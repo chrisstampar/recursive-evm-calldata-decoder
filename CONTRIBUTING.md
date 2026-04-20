@@ -25,6 +25,8 @@ npm test
 npm run build
 ```
 
+ESLint and Vitest configs live under **`config/`** (see `package.json` scripts).
+
 `npm run build` runs the bundled-signature registry validator and a production Vite build; it must pass for changes that touch `src/lib/abiRegistry.ts` or bundled signatures.
 
 ## Live-RPC integration tests (optional)

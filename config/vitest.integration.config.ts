@@ -1,5 +1,5 @@
 import { defineConfig, mergeConfig } from 'vitest/config';
-import viteConfig from './vite.config';
+import viteConfig from '../vite.config';
 
 /** Live-RPC / network tests — run: `npm run test:integration` */
 export default mergeConfig(
