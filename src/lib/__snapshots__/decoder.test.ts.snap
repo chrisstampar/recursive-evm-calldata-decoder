@@ -1,0 +1,31 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`decodeCalldata — Curve router exchange (stable) > maps _amount / _min_dy to first and last resolvable tokens in _route (USDC → USDT) 1`] = `
+{
+  "confidence": "exact",
+  "params": [
+    {
+      "name": "_route",
+      "type": "address[11]",
+    },
+    {
+      "name": "_swap_params",
+      "type": "uint256[5][5]",
+    },
+    {
+      "name": "_amount",
+      "type": "uint256",
+    },
+    {
+      "name": "_min_dy",
+      "type": "uint256",
+    },
+    {
+      "name": "_pools",
+      "type": "address[5]",
+    },
+  ],
+  "selector": "0x5c9c18e2",
+  "signature": "exchange",
+}
+`;

@@ -1,0 +1,16 @@
+/* Tailwind v4 entry: compiled by `@tailwindcss/vite` in `vite.config.ts` (not the legacy PostCSS-only plugin). */
+@import "tailwindcss";
+
+/* Class-driven dark mode (Tailwind v3-style `darkMode: 'class'`). Enables `dark:*` when `<html class="dark">` (or any `.dark` ancestor). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Theme extensions: add `@theme { ... }` below, `@import "./theme.css";`, or keep using `tailwind.config.ts` if you introduce one. */
+@layer base {
+  :root {
+    /* App-wide custom properties when not expressed via `@theme` / `theme()`. */
+  }
+
+  html {
+    @apply antialiased;
+  }
+}

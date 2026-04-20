@@ -1,0 +1,42 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Agent/session context (local only — do not publish)
+AGENT_SESSION_CONTEXT.md
+
+# Internal review checklist (optional local file)
+review.md
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Vite pre-bundle cache (large, machine-specific)
+node_modules/.vite
+
+# Coverage / reports
+coverage
+*.lcov

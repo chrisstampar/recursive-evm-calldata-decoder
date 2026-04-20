@@ -1,0 +1,65 @@
+{
+  "name": "rec_dec",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Client-side recursive decoder for Ethereum transaction calldata (multicall, nested bytes, token-aware formatting).",
+  "license": "MIT",
+  "keywords": [
+    "ethereum",
+    "calldata",
+    "abi",
+    "decoder",
+    "evm",
+    "vite",
+    "react"
+  ],
+  "engines": {
+    "node": ">=20.19.0",
+    "npm": ">=10.0.0"
+  },
+  "browserslist": [
+    "defaults",
+    "not IE 11",
+    "supports es6-module"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "regen:chainlist-names": "node scripts/regen-chainlist-names.mjs",
+    "validate-registry": "tsx build/validateRegistry.ts",
+    "build:fast": "tsc -b && vite build",
+    "build": "npm run validate-registry && npm run build:fast",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "type-check": "tsc -b --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "ethers": "^6.16.0",
+    "lru-cache": "^11.2.7",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@tailwindcss/vite": "^4.2.2",
+    "@types/node": "^24.12.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.4.0",
+    "tailwindcss": "^4.2.2",
+    "tsx": "^4.19.4",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.57.0",
+    "vite": "^8.0.1",
+    "vitest": "^3.2.4"
+  }
+}
