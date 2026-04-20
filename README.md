@@ -47,7 +47,7 @@ npm run build
 npm run preview
 ```
 
-Replace `<YOUR_REPO_URL>` with your GitHub clone URL after you create the repository.
+Replace `<YOUR_REPO_URL>` with your GitHub clone URL after you create the repository. **Node:** use **v22** (see `.nvmrc`) to match CI.
 
 ## Deploying
 
