@@ -14,6 +14,8 @@ cd rec_dec
 npm ci
 ```
 
+If `npm run build` fails with an **esbuild wrong platform** error (for example after copying `node_modules` from another CPU or mixing Rosetta and native Node), delete `node_modules` and run **`npm ci`** again on the machine you develop on.
+
 ## Checks before a PR
 
 ```bash
