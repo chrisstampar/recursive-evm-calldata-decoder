@@ -9,8 +9,8 @@ Thanks for helping improve the Recursive Calldata Decoder.
 ## Setup
 
 ```bash
-git clone https://github.com/<owner>/rec_dec.git
-cd rec_dec
+git clone https://github.com/chrisstampar/recursive-evm-calldata-decoder.git
+cd recursive-evm-calldata-decoder
 npm ci
 ```
 

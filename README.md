@@ -33,8 +33,8 @@ Known token addresses with decimal metadata: WETH, DAI, USDC, USDT, WBTC, LINK, 
 ## Getting Started
 
 ```bash
-git clone <YOUR_REPO_URL>
-cd rec_dec
+git clone https://github.com/chrisstampar/recursive-evm-calldata-decoder.git
+cd recursive-evm-calldata-decoder
 npm ci
 
 # Development server (http://localhost:5173)
@@ -47,7 +47,7 @@ npm run build
 npm run preview
 ```
 
-Replace `<YOUR_REPO_URL>` with your GitHub clone URL after you create the repository. **Node:** use **v22** (see `.nvmrc`) to match CI.
+**Node:** use **v22** (see `.nvmrc`) to match CI. **Repository:** [github.com/chrisstampar/recursive-evm-calldata-decoder](https://github.com/chrisstampar/recursive-evm-calldata-decoder).
 
 ## Deploying
 
