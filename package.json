@@ -33,6 +33,7 @@
   ],
   "scripts": {
     "dev": "vite",
+    "gen:icons": "node scripts/gen-app-icons.mjs",
     "regen:chainlist-names": "node scripts/regen-chainlist-names.mjs",
     "validate-registry": "tsx build/validateRegistry.ts",
     "build:fast": "tsc --noEmit && vite build",
@@ -64,6 +65,7 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
+    "pngjs": "^7.0.0",
     "tailwindcss": "^4.2.2",
     "tsx": "^4.19.4",
     "typescript": "~5.9.3",

@@ -27,6 +27,8 @@ npm run build
 
 ESLint and Vitest configs live under **`config/`** (see `package.json` scripts).
 
+If you change **`public/favicon.svg`**, regenerate PNGs with **`npm run gen:icons`** (updates `favicon-32x32.png`, **`icon-192.png`**, **`icon-512.png`** for manifest / OG / Apple touch).
+
 `npm run build` runs the bundled-signature registry validator and a production Vite build; it must pass for changes that touch `src/lib/abiRegistry.ts` or bundled signatures.
 
 ## Live-RPC integration tests (optional)

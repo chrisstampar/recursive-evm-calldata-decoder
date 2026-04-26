@@ -62,6 +62,8 @@ npm run preview
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). CI runs lint, typecheck, unit tests, and a full production build.
 
+Planned improvements and batched-release notes: [docs/ROADMAP.md](docs/ROADMAP.md).
+
 ## Repository layout
 
 ```
@@ -70,7 +72,7 @@ docs/             # Extra guides (e.g. error boundary patterns)
 build/            # validate-registry script (bundled ABI checks)
 scripts/          # Maintenance scripts (chain names, etc.)
 src/              # Application source
-public/           # Static assets, manifest
+public/           # Static assets, manifest; brand mark `favicon.svg` — run `npm run gen:icons` after editing it
 ```
 
 ## Tech Stack
