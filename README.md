@@ -1,5 +1,15 @@
 # Recursive Calldata Decoder
 
+<p align="center">
+  <a href="https://recdec.eth.limo" title="Open the live app"
+    ><img
+      src="https://raw.githubusercontent.com/chrisstampar/recursive-evm-calldata-decoder/main/public/icon-512.png"
+      width="120"
+      height="120"
+      alt="Recursive Calldata Decoder app icon"
+  /></a>
+</p>
+
 [![CI](https://github.com/chrisstampar/recursive-evm-calldata-decoder/actions/workflows/ci.yml/badge.svg)](https://github.com/chrisstampar/recursive-evm-calldata-decoder/actions/workflows/ci.yml)
 
 A **client-side** web tool that recursively decodes Ethereum transaction calldata into a human-readable tree. Unlike decoders that only show the top-level call, this expands **multicalls**, **batched transactions**, and **nested ABI-encoded `bytes`** until each layer is decoded—entirely in the browser.
@@ -63,6 +73,8 @@ npm run preview
 See [CONTRIBUTING.md](CONTRIBUTING.md). CI runs lint, typecheck, unit tests, and a full production build.
 
 Planned improvements and batched-release notes: [docs/ROADMAP.md](docs/ROADMAP.md).
+
+**Repository link preview (Twitter, Discord, etc.):** GitHub does not use `favicon` for that. Set **Settings → General → Social preview** and upload **`public/icon-512.png`** (or a 1280×640 image).
 
 ## Repository layout
 
