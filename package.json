@@ -35,14 +35,15 @@
     "dev": "vite",
     "regen:chainlist-names": "node scripts/regen-chainlist-names.mjs",
     "validate-registry": "tsx build/validateRegistry.ts",
-    "build:fast": "tsc -b && vite build",
+    "build:fast": "tsc --noEmit && vite build",
+    "build:ipfs": "npm run validate-registry && tsc --noEmit && vite build --base ./",
     "build": "npm run validate-registry && npm run build:fast",
     "test": "vitest run --config config/vitest.config.ts",
     "test:integration": "vitest run --config config/vitest.integration.config.ts",
     "test:watch": "vitest --config config/vitest.config.ts",
     "lint": "eslint . --config config/eslint.config.js",
     "lint:fix": "eslint . --config config/eslint.config.js --fix",
-    "type-check": "tsc -b --noEmit",
+    "type-check": "tsc --noEmit",
     "preview": "vite preview"
   },
   "dependencies": {

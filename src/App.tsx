@@ -16,6 +16,8 @@ import type { TxFetchContext } from './lib/txFetcher.ts';
 
 const isDev = import.meta.env.DEV;
 
+const SOURCE_REPO_URL = 'https://github.com/chrisstampar/recursive-evm-calldata-decoder';
+
 /** Strip `#…` while keeping pathname and query (e.g. `?expand=`). */
 function clearUrlHash(): void {
   try {
@@ -227,14 +229,25 @@ export default function App() {
     <ChainProvider value={chainUi}>
       <div className="min-h-screen bg-gray-950">
         <div className="max-w-6xl mx-auto px-2 sm:px-4 py-6 sm:py-10">
-          <header className="mb-8">
-            <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
-              Recursive Calldata Decoder
-            </h1>
-            <p className="mt-2 text-sm text-gray-500 max-w-2xl">
-              Decode EVM transaction calldata recursively. Multicalls, batched transactions,
-              and nested calls are fully expanded into a human-readable tree.
-            </p>
+          <header className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+            <div className="min-w-0">
+              <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
+                Recursive Calldata Decoder
+              </h1>
+              <p className="mt-2 text-sm text-gray-500 max-w-2xl">
+                Decode EVM transaction calldata recursively. Multicalls, batched transactions,
+                and nested calls are fully expanded into a human-readable tree.
+              </p>
+            </div>
+            <a
+              href={SOURCE_REPO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 text-sm text-gray-500 hover:text-gray-300 underline-offset-2 hover:underline"
+              aria-label="View source on GitHub (opens in new tab)"
+            >
+              GitHub
+            </a>
           </header>
 
           <main className="space-y-6">

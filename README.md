@@ -1,6 +1,10 @@
 # Recursive Calldata Decoder
 
+[![CI](https://github.com/chrisstampar/recursive-evm-calldata-decoder/actions/workflows/ci.yml/badge.svg)](https://github.com/chrisstampar/recursive-evm-calldata-decoder/actions/workflows/ci.yml)
+
 A **client-side** web tool that recursively decodes Ethereum transaction calldata into a human-readable tree. Unlike decoders that only show the top-level call, this expands **multicalls**, **batched transactions**, and **nested ABI-encoded `bytes`** until each layer is decoded—entirely in the browser.
+
+**Live app:** [https://recdec.eth.limo](https://recdec.eth.limo) (ENS + IPFS).
 
 **Any calldata:** the tool decodes **arbitrary** `0x` input using standard ABI rules, selector resolution, and nested-`bytes` heuristics. **Bundled protocol names, contract labels, token metadata, and “≈ USD” hints for known stables** are optional enrichments when there is a match—**nothing in the curated lists is required** for the tree to render or for nested calls to expand.
 
@@ -52,7 +56,7 @@ npm run build
 npm run preview
 ```
 
-**Node:** use **v22** (see `.nvmrc`) to match CI. **Repository:** [github.com/chrisstampar/recursive-evm-calldata-decoder](https://github.com/chrisstampar/recursive-evm-calldata-decoder).
+**Node:** **≥20.19** (`package.json` `engines`); CI uses **Node 22**. **Repository:** [github.com/chrisstampar/recursive-evm-calldata-decoder](https://github.com/chrisstampar/recursive-evm-calldata-decoder).
 
 ## Contributing
 
@@ -103,6 +107,8 @@ src/
 Using `ErrorBoundary` outside this app shell? See [docs/error-boundary.md](docs/error-boundary.md).
 
 ## Security
+
+For **private vulnerability reports**, see [SECURITY.md](SECURITY.md).
 
 - **No backend** -- All decoding happens client-side; calldata never leaves your browser for decode logic
 - **Content Security Policy** -- Strict CSP via meta tag restricting scripts, styles, and network connections to known endpoints
