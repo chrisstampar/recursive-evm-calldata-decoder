@@ -72,8 +72,6 @@ npm run preview
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). CI runs lint, typecheck, unit tests, and a full production build.
 
-Planned improvements and batched-release notes: [docs/ROADMAP.md](docs/ROADMAP.md).
-
 **Repository link preview (Twitter, Discord, etc.):** GitHub does not use `favicon` for that. Set **Settings → General → Social preview** and upload **`public/icon-512.png`** (or a 1280×640 image).
 
 ## Repository layout
