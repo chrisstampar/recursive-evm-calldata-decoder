@@ -275,6 +275,25 @@ export default function App() {
     }
   }, [chainId, handleDecode, offlineMode, skipEns]);
 
+  /**
+   * Editing or pasting a different `#calldata` into the address bar doesn't reload the page; decode it as new input.
+   * (`history.replaceState` from our own decodes never fires `hashchange`.)
+   */
+  useEffect(() => {
+    const onHashChange = () => {
+      const hashCalldata = getCalldataFromHash();
+      if (!hashCalldata) return;
+      const last = lastDecodeRef.current;
+      const lastNorm = last ? validateHexInput(last.calldata) : null;
+      if (lastNorm?.valid && lastNorm.normalized === hashCalldata) return;
+      lastDecodeRef.current = null;
+      setInitialCalldata(hashCalldata);
+      void handleDecode(hashCalldata, undefined, offlineMode);
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, [handleDecode, offlineMode]);
+
   return (
     <ChainProvider value={chainUi}>
       <div className="min-h-screen bg-gray-950">

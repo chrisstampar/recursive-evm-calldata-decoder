@@ -68,6 +68,16 @@ npm run preview
 
 **Node:** **≥20.19** (`package.json` `engines`); CI uses **Node 22**. **Repository:** [github.com/chrisstampar/recursive-evm-calldata-decoder](https://github.com/chrisstampar/recursive-evm-calldata-decoder).
 
+## Deploying (IPFS + ENS)
+
+The live site is a static build pinned to IPFS and served through the `recdec.eth` ENS name.
+
+1. `npm run build:ipfs` — same checks as `build`, with relative asset paths so the site works from any gateway path.
+2. Upload the whole `dist/` folder to the pinning service (Pinata) as a directory and note the root CID.
+3. Check it on a gateway before switching: `https://<CID>.ipfs.dweb.link/` should load and decode a sample.
+4. In the ENS manager, set `recdec.eth`'s **Content hash** to `ipfs://<CID>` (an on-chain transaction from the owner wallet).
+5. After it confirms, check `https://recdec.eth.limo` (gateways can cache the old content for a few minutes).
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). CI runs lint, typecheck, unit tests, and a full production build.
