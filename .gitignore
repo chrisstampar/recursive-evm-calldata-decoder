@@ -25,6 +25,7 @@ dist-ssr
 
 # Agent/session context (local only — do not publish)
 AGENT_SESSION_CONTEXT.md
+_archive/
 
 # Internal review checklist (optional local file)
 review.md
