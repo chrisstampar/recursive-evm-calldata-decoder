@@ -25,12 +25,12 @@ A **client-side** web tool that recursively decodes Ethereum transaction calldat
 - **3-tier signature resolution** -- Bundled ABIs (instant) -> [openchain.xyz](https://openchain.xyz) -> [4byte.directory](https://www.4byte.directory) as fallback
 - **Token-aware formatting** -- When sibling parameters include **known token addresses**, adjacent `uint256` amounts use that token’s decimals and symbol (and, for configured stablecoins, an approximate USD peg line where applicable)
 - **Smart value interpretation** -- EIP-55 checksummed addresses with explorer links, known contract labels, timestamp detection, max-uint256 detection, zero address labeling
-- **Confidence scoring** -- When multiple signatures match a selector, candidates are scored and the best match is shown with alternatives available
+- **Confidence scoring** -- When multiple signatures match a selector, candidates are scored (an exact, canonical fit of every byte wins) and the best match is shown with alternatives available
 - **Offline mode** -- Toggle to use only bundled ABIs with zero network requests
 - **Custom ABI support** -- Paste a contract ABI JSON for guaranteed-correct decoding with named parameters
 - **URL sharing** -- Decoded calldata is stored in the URL hash for easy sharing
 - **JSON export** -- Switch between tree view and raw JSON, with one-click copy
-- **Pure client-side** -- No backend; calldata never leaves your browser for decoding logic
+- **Client-side** -- No backend; decoding runs in your browser. Unknown selectors are looked up on public signature databases and tx hashes / ENS / token details on public RPCs; Offline mode sends nothing
 
 ## Supported protocols (bundled shortcuts)
 
@@ -122,7 +122,12 @@ Using `ErrorBoundary` outside this app shell? See [docs/error-boundary.md](docs/
 
 For **private vulnerability reports**, see [SECURITY.md](SECURITY.md).
 
-- **No backend** -- All decoding happens client-side; calldata never leaves your browser for decode logic
+- **No backend** -- All decoding happens client-side. Lookups go to public signature APIs and RPCs (capped per decode); Offline mode makes no requests
+- **Spoof-resistant labels** -- Function names from public databases must be ASCII identifiers (no invisible or lookalike characters); token symbols read from a contract are shown as unverified and never get a USD estimate; ERC-20 amounts use the called token, never an address argument
+- **Tx-hash integrity** -- A fetched transaction is re-hashed locally and must match the requested hash, so an RPC cannot substitute calldata
+- **Hidden data surfaced** -- Bytes after the ABI arguments, non-canonical encodings and malformed Safe `multiSend` rows are shown with warnings
+- **Safe operations** -- DELEGATECALLs in `execTransaction` / `multiSend` get explicit warnings
+- **No framing** -- The app refuses to render inside another page (clickjacking)
 - **Content Security Policy** -- Strict CSP via meta tag restricting scripts, styles, and network connections to known endpoints
 - **Input validation** -- Strict hex format validation with size limits before any processing
 - **Output sanitization** -- Decoded string values are sanitized to prevent XSS

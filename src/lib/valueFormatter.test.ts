@@ -219,7 +219,7 @@ describe('formatTokenAmount', () => {
   it('uses whole units when decimals is 0 (no leading-dot bug)', () => {
     const r = formatTokenAmount('12345', 0, 'NFT');
     expect(r.display).toBe('12345');
-    expect(r.interpretation).toBe('12345 NFT');
+    expect(r.interpretation).toBe('12,345 NFT');
   });
 
   it('sanitizes symbol for display (control chars, empty fallback)', () => {

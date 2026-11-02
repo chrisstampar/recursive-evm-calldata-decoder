@@ -1,7 +1,7 @@
-import { keccak256, toUtf8Bytes, Interface, type FunctionFragment } from 'ethers';
+import { keccak256, toUtf8Bytes, Interface, type FunctionFragment, type ParamType } from 'ethers';
 import { LRUCache } from 'lru-cache';
 import { z } from 'zod';
-import type { FunctionSignature, HexSelector, SignatureSource } from '../types/index.ts';
+import type { FunctionSignature, HexSelector, SignatureParam, SignatureSource } from '../types/index.ts';
 import { lookupBundledSelector } from './abiRegistry.ts';
 import { isValidFunctionSelector } from './sanitize.ts';
 import { validateTextSignature, parseTextSignature, canonicalizeTextSignature } from './signatureValidator.ts';
@@ -130,6 +130,11 @@ export interface LookupOptions {
   offlineMode: boolean;
   /** `source` is `openchain`, `sourcify`, or `4byte`. */
   onError?: (source: string, error: unknown) => void;
+  /**
+   * Called before a cache miss goes to the network; returning false answers from bundled / cache only.
+   * Lets a caller cap how many third-party lookups one decode can trigger.
+   */
+  allowNetworkLookup?: () => boolean;
 }
 
 /**
@@ -358,6 +363,7 @@ export async function lookupSelector(
   }
 
   if (options.offlineMode) return [];
+  if (options.allowNetworkLookup && !options.allowNetworkLookup()) return [];
 
   const onError = options.onError;
   // Sourcify first in merge order so verified/aggregated DB wins on duplicate text with OpenChain.
@@ -381,6 +387,26 @@ export interface LookupSelectorFromUserAbiOptions {
    * Function selectors are not EIP-55 checksummed; this is mainly for observability.
    */
   onNonCanonicalSelector?: (requested: string, normalized: string) => void;
+}
+
+/** Tuple components of `p`, looking through array dimensions (`(a,b)[]` → components of `(a,b)`). */
+function tupleComponentsOf(p: ParamType): readonly ParamType[] | null {
+  if (p.isTuple()) return p.components;
+  if (p.isArray()) return tupleComponentsOf(p.arrayChildren);
+  return null;
+}
+
+/**
+ * ethers reports struct types as `tuple(...)`; the decoder and UI use the canonical `(…)` form, so take
+ * `format('sighash')` and keep component names for field labels.
+ */
+export function paramTypeToSignatureParam(p: ParamType, fallbackName: string): SignatureParam {
+  const out: SignatureParam = { name: p.name || fallbackName, type: p.format('sighash') };
+  const comps = tupleComponentsOf(p);
+  if (comps) {
+    out.components = comps.map((c, i) => paramTypeToSignatureParam(c, `field${i}`));
+  }
+  return out;
 }
 
 export function lookupSelectorFromUserAbi(
@@ -415,10 +441,7 @@ export function lookupSelectorFromUserAbi(
             selector: normalizedSelector as HexSelector,
             name: fnFragment.name,
             textSignature: fnFragment.format('sighash'),
-            params: fnFragment.inputs.map((i, idx) => ({
-              name: i.name || `arg${idx}`,
-              type: i.type,
-            })),
+            params: fnFragment.inputs.map((p, idx) => paramTypeToSignatureParam(p, `arg${idx}`)),
             source: 'user-abi',
             popularity: Math.max(0, 100 - results.length * 12),
           });

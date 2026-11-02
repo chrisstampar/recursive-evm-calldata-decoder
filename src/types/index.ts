@@ -11,7 +11,10 @@ export type HexSelector = `0x${string}`;
 /** One ABI parameter slot in a resolved signature (name + Solidity type). */
 export interface SignatureParam {
   name: string;
+  /** Canonical Solidity type; tuples use the `(a,b)` / `(a,b)[]` form, never ethers' `tuple(...)`. */
   type: string;
+  /** Field names for tuple (or tuple-array) types, when the ABI provides them. */
+  components?: SignatureParam[];
 }
 
 export interface FunctionSignature {
@@ -54,8 +57,25 @@ export interface WordAlignedAddressHit {
   ensName?: string;
 }
 
+/** Token unit attached to an amount by the decoder (structured, so warnings never parse display text). */
+export interface TokenAmountContext {
+  symbol: string;
+  decimals: number;
+  /** Symbol/decimals were read from the token contract itself (attacker-controlled), not the curated registry. */
+  unverified?: boolean;
+  /** The unit was inferred from another address in the call, not from a known parameter layout. */
+  guessed?: boolean;
+}
+
 export type DecodedValue =
-  | { kind: 'primitive'; display: string; raw: string; interpretation?: string; embeddedEvmAddress?: EmbeddedEvmAddress }
+  | {
+      kind: 'primitive';
+      display: string;
+      raw: string;
+      interpretation?: string;
+      embeddedEvmAddress?: EmbeddedEvmAddress;
+      tokenAmount?: TokenAmountContext;
+    }
   | { kind: 'address'; address: string; checksummed: string; label?: string; ensName?: string }
   | {
       kind: 'bytes';
@@ -77,6 +97,21 @@ export interface DecodedCall {
   alternatives: FunctionSignature[];
   depth: number;
   rawCalldata: string;
+  /**
+   * Bytes after the ABI-encoded arguments. The ABI decoder ignores them (so does Solidity), but contracts can still
+   * read them via `msg.data` — ERC-2771 forwarders append the sender there, hostile contracts can hide data there.
+   */
+  unparsedTrailingHex?: string;
+  /**
+   * Arguments decoded but do not re-encode to the same bytes: out-of-range small ints / bools (shown masked by the
+   * decoder, rejected by Solidity's ABI v2 decoder) or unusual dynamic offsets.
+   */
+  nonCanonicalEncoding?: boolean;
+  /**
+   * Found by probing opaque bytes (an unhinted `bytes` param, or an offset scan in a packed payload) rather than a
+   * known calldata layout. It may be a coincidental match.
+   */
+  speculative?: boolean;
 }
 
 export type WarningSeverity = 'info' | 'warning' | 'danger';
@@ -154,6 +189,17 @@ export interface DecodeOptions {
    * collide with `"undefined:0x…"`.
    */
   tokenLookupSessionCache?: Map<string, Promise<TokenInfo | undefined>>;
+  /**
+   * @internal Remaining third-party signature lookups for this top-level decode (created at depth 0). Every unknown
+   * selector costs up to three requests to public APIs from the viewer's browser, and packed-payload scans probe many
+   * offsets, so the total is capped.
+   */
+  remoteLookupBudget?: { remaining: number; exhaustedWarned: boolean };
+  /**
+   * @internal Resolve selectors from bundled signatures and cache only. Set for speculative offset scans, where most
+   * probed "selectors" are random bytes and would otherwise each become a public API request.
+   */
+  bundledOnlySignatureLookup?: boolean;
   /**
    * Cooperative cancellation: `decodeCalldata` checks `signal.aborted` after `await`s and on a throttled schedule
    * in long indexed loops (see `ABORT_CHECK_INTERVAL` in `decoder.ts`)—not on every scalar step. For on-chain token

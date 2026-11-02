@@ -7,8 +7,8 @@ import { DecodeTree } from './components/DecodeTree.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 import { WarningBanner } from './components/WarningBanner.tsx';
 import { validateHexInput } from './lib/sanitize.ts';
-import { ChainProvider } from './context/ChainContext.tsx';
-import { DEFAULT_CHAIN_ID } from './lib/chains.ts';
+import { ChainProvider } from './context/ChainContext.ts';
+import { CHAINS, DEFAULT_CHAIN_ID } from './lib/chains.ts';
 import { analyzeWarnings } from './lib/warningAnalyzer.ts';
 import { SAMPLE_DEV_WARNINGS } from './lib/sampleWarnings.ts';
 import { DEFAULT_AUTO_EXPAND_DEPTH } from './components/TreeNode.tsx';
@@ -41,6 +41,40 @@ function readAutoExpandMaxDepthFromUrl(): number {
   }
 }
 
+/** `?chain=<id>` — chain the shared calldata was decoded on (labels, decimals and explorer links are per chain). */
+function readChainIdFromUrl(): number {
+  try {
+    const raw = new URLSearchParams(window.location.search).get('chain');
+    const n = raw == null ? NaN : Number(raw);
+    return Number.isInteger(n) && CHAINS[n] ? n : DEFAULT_CHAIN_ID;
+  } catch {
+    return DEFAULT_CHAIN_ID;
+  }
+}
+
+/** Current query string with `chain` set (keeps `?expand=` and anything else). */
+function searchWithChain(chainId: number): string {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (chainId === DEFAULT_CHAIN_ID) params.delete('chain');
+    else params.set('chain', String(chainId));
+    const q = params.toString();
+    return q ? `?${q}` : '';
+  } catch {
+    return window.location.search;
+  }
+}
+
+/** Everything a decode used, so a chain / Offline / ENS toggle re-runs it with the same ABI, To and value. */
+interface LastDecode {
+  calldata: string;
+  abi: string | undefined;
+  msgValueWei?: string;
+  txTo?: string | null;
+  txFetchContext?: TxFetchContext | null;
+  chainId: number;
+}
+
 function getCalldataFromHash(): string | null {
   const hash = window.location.hash;
   if (!hash || hash.length < 3) return null;
@@ -57,13 +91,14 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [decodeTimeMs, setDecodeTimeMs] = useState<number | null>(null);
   const [initialCalldata, setInitialCalldata] = useState<string | null>(null);
-  const [chainId, setChainId] = useState(DEFAULT_CHAIN_ID);
+  const [chainId, setChainId] = useState(() => readChainIdFromUrl());
   const [offlineMode, setOfflineMode] = useState(false);
   const [skipEns, setSkipEns] = useState(false);
   const [previewSampleWarnings, setPreviewSampleWarnings] = useState(false);
   const [autoExpandMaxDepth, setAutoExpandMaxDepth] = useState(() => readAutoExpandMaxDepthFromUrl());
 
   const decodeAbortRef = useRef<AbortController | null>(null);
+  const lastDecodeRef = useRef<LastDecode | null>(null);
 
   const chainUi = useMemo(
     () => ({ chainId, offlineMode, setOfflineMode, skipEns, setSkipEns }),
@@ -118,6 +153,7 @@ export default function App() {
   ) => {
     decodeAbortRef.current?.abort();
     setPreviewSampleWarnings(false);
+    lastDecodeRef.current = { calldata, abi, msgValueWei, txTo, txFetchContext, chainId };
 
     const calldataNorm = calldata.trim().toLowerCase();
     const isEmptyCalldata = calldataNorm === '0x' || calldataNorm === '';
@@ -178,8 +214,8 @@ export default function App() {
         setResult(decoded);
       } else {
         try {
-          const { pathname, search } = window.location;
-          history.replaceState(null, '', `${pathname}${search}#${calldata}`);
+          // Chain goes in the query so a shared link decodes with the same registry, decimals and explorer.
+          history.replaceState(null, '', `${window.location.pathname}${searchWithChain(chainId)}#${calldata}`);
         } catch {
           /* ignore navigation errors */
         }
@@ -213,11 +249,25 @@ export default function App() {
   }, [chainId, skipEns]);
 
   /**
-   * When the URL fragment holds valid calldata, treat it as source of truth: sync `CalldataInput` and decode.
-   * Re-runs when `chainId` changes so registry/RPC context matches. If the user clears the textarea but leaves
-   * the hash, a chain change will re-fill from the fragment and decode again (same as reloading with that URL).
+   * Chain, Offline or Skip-ENS changed (or first load): re-run the last decode with the same ABI, To and value so
+   * nothing the user supplied is silently dropped. A decode that came from a tx hash belongs to the chain it was
+   * fetched on, so switching chain clears it instead of decoding that calldata against another chain. With no prior
+   * decode, a valid URL fragment is the source of truth (shared link / reload).
    */
   useEffect(() => {
+    const last = lastDecodeRef.current;
+    if (last) {
+      if (last.txFetchContext && last.chainId !== chainId) {
+        lastDecodeRef.current = null;
+        decodeAbortRef.current?.abort();
+        setResult(null);
+        setDecodeTimeMs(null);
+        clearUrlHash();
+        return;
+      }
+      void handleDecode(last.calldata, last.abi, offlineMode, last.msgValueWei, last.txTo, last.txFetchContext);
+      return;
+    }
     const hashCalldata = getCalldataFromHash();
     if (hashCalldata) {
       setInitialCalldata(hashCalldata);
@@ -333,8 +383,12 @@ export default function App() {
           </main>
 
           <footer className="mt-12 pt-6 border-t border-gray-900 text-center">
-            <p className="text-xs text-gray-700">
-              Pure client-side. No data leaves your browser.
+            <p className="text-xs text-gray-700 max-w-2xl mx-auto">
+              Decoding runs in your browser; there is no backend. Unknown function selectors are looked up on public
+              signature databases, and tx hashes, ENS names and token details on public RPCs, so those services see
+              them. Turn on Offline mode to send nothing.
+            </p>
+            <p className="mt-2 text-xs text-gray-700">
               Signatures via{' '}
               <a
                 href="https://4byte.sourcify.dev"

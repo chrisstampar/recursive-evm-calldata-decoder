@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { formatEther } from 'ethers';
 import type { DecodeResult } from '../types/index.ts';
-import { useChainId, useOfflineMode } from '../context/ChainContext.tsx';
+import { useChainId, useOfflineMode } from '../context/ChainContext.ts';
 import { TreeExpansionProvider } from '../context/TreeExpansionContext.tsx';
 import { getKnownPattern } from '../lib/knownPatterns.ts';
 import { getChain, type ChainConfig } from '../lib/chains.ts';

@@ -4,7 +4,7 @@ import { isValidTxHash, fetchTxCalldata, type TxFetchContext, type TxInfo } from
 import { getContractName } from '../lib/abiRegistry.ts';
 import { formatEther, getAddress } from 'ethers';
 import { CHAIN_LIST, getChain, type ChainConfig } from '../lib/chains.ts';
-import { useChainUi } from '../context/ChainContext.tsx';
+import { useChainUi } from '../context/ChainContext.ts';
 import { ExplorerAddressLink } from './ExplorerAddressLink.tsx';
 
 type InputMode = 'calldata' | 'txhash';
@@ -26,6 +26,19 @@ function hashFragmentHasValidCalldata(): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Initial textarea value: URL calldata wins; otherwise restore the same-tab `sessionStorage` draft when the URL has
+ * no valid calldata fragment (so a reload keeps the draft).
+ */
+function initialCalldataValue(initialCalldata: string | null | undefined): string {
+  if (initialCalldata) return initialCalldata;
+  if (hashFragmentHasValidCalldata()) return '';
+  const raw = safeSessionGetCalldataDraft();
+  if (!raw) return '';
+  const vr = validateHexInput(raw);
+  return vr.valid ? vr.normalized : '';
 }
 
 function safeSessionGetCalldataDraft(): string | null {
@@ -189,6 +202,21 @@ function TxInfoBar({ txInfo, chain }: { txInfo: TxInfo; chain: ChainConfig }) {
             Pending
           </span>
         )}
+        {txInfo.integrity === 'verified' ? (
+          <span
+            className="px-1.5 py-0.5 rounded bg-green-950/60 text-green-300 border border-green-800/50 text-[10px]"
+            title={`The RPC response re-hashes to this transaction hash, so its calldata and sender are authentic${txInfo.rpcHost ? ` (answered by ${txInfo.rpcHost})` : ''}.`}
+          >
+            Verified against hash
+          </span>
+        ) : (
+          <span
+            className="px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800/50 text-[10px]"
+            title={`This transaction type could not be re-hashed locally, so the calldata is as reported by ${txInfo.rpcHost ?? 'the RPC'}. Cross-check on a block explorer.`}
+          >
+            Not verified
+          </span>
+        )}
       </div>
       <div className="flex items-center gap-4 flex-wrap">
         <span>
@@ -263,20 +291,34 @@ export function CalldataInput({
   const currentChain = useMemo(() => getChain(chainId), [chainId]);
 
   const [inputMode, setInputMode] = useState<InputMode>('calldata');
-  const [calldata, setCalldata] = useState(initialCalldata ?? '');
+  const [calldata, setCalldata] = useState(() => initialCalldataValue(initialCalldata));
   const [txHash, setTxHash] = useState('');
   const [abiJson, setAbiJson] = useState('');
   const [txInfo, setTxInfo] = useState<TxInfo | null>(null);
   const [isFetchingTx, setIsFetchingTx] = useState(false);
 
   /** Last calldata textarea value for calldata mode (preserved when switching to tx-hash and back). */
-  const calldataDraftRef = useRef(initialCalldata ?? '');
+  const calldataDraftRef = useRef(calldata);
   const onDecodeRef = useRef(onDecode);
-  onDecodeRef.current = onDecode;
+  useEffect(() => {
+    onDecodeRef.current = onDecode;
+  }, [onDecode]);
 
   /** After at least one URL-driven calldata sync, `initialCalldata === null` clears the field + session draft. */
   const hasReceivedUrlCalldataRef = useRef(false);
-  const didHydrateCalldataFromSessionRef = useRef(false);
+  const [syncedInitialCalldata, setSyncedInitialCalldata] = useState(initialCalldata);
+  const [hasReceivedUrlCalldata, setHasReceivedUrlCalldata] = useState(Boolean(initialCalldata));
+
+  // Adjust the textarea when the URL-driven prop changes (render-time, per React's "adjusting state on prop change").
+  if (initialCalldata !== syncedInitialCalldata) {
+    setSyncedInitialCalldata(initialCalldata);
+    if (initialCalldata != null && initialCalldata !== '') {
+      setHasReceivedUrlCalldata(true);
+      setCalldata(initialCalldata);
+    } else if (initialCalldata === null && hasReceivedUrlCalldata) {
+      setCalldata('');
+    }
+  }
   const sessionPersistTimerRef = useRef<number | null>(null);
 
   const schedulePersistCalldataDraft = useCallback((value: string) => {
@@ -304,34 +346,16 @@ export function CalldataInput({
   useEffect(() => {
     if (initialCalldata != null && initialCalldata !== '') {
       hasReceivedUrlCalldataRef.current = true;
-      setCalldata(initialCalldata);
       calldataDraftRef.current = initialCalldata;
       safeSessionSetCalldataDraft(initialCalldata);
       return;
     }
     if (initialCalldata === null) {
       if (!hasReceivedUrlCalldataRef.current) return;
-      setCalldata('');
       calldataDraftRef.current = '';
       safeSessionClearCalldataDraft();
     }
   }, [initialCalldata]);
-
-  /**
-   * Restore calldata from `sessionStorage` once per mount when the URL has no valid calldata fragment
-   * (hash wins; same tab reload keeps the draft).
-   */
-  useEffect(() => {
-    if (didHydrateCalldataFromSessionRef.current) return;
-    didHydrateCalldataFromSessionRef.current = true;
-    if (hashFragmentHasValidCalldata()) return;
-    const raw = safeSessionGetCalldataDraft();
-    if (!raw) return;
-    const vr = validateHexInput(raw);
-    if (!vr.valid) return;
-    setCalldata(vr.normalized);
-    calldataDraftRef.current = vr.normalized;
-  }, []);
 
   const [showAbi, setShowAbi] = useState(false);
   const [error, setError] = useState<string | null>(null);

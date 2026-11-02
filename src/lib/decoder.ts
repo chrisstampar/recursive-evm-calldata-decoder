@@ -1,4 +1,4 @@
-import { AbiCoder, getBytes, hexlify, type Interface } from 'ethers';
+import { AbiCoder, formatEther, getBytes, hexlify, type Interface } from 'ethers';
 import type {
   DecodedCalldataOutcome,
   DecodedCall,
@@ -8,6 +8,7 @@ import type {
   FunctionSignature,
   DecodeConfidence,
   HexSelector,
+  SignatureParam,
   TxWarning,
   WordAlignedAddressHit,
 } from '../types/index.ts';
@@ -18,6 +19,8 @@ import {
   lookupSelector,
   lookupSelectorFromUserAbi,
   MAX_USER_ABI_JSON_CHARS,
+  type LookupOptions,
+  paramTypeToSignatureParam,
 } from './signatureLookup.ts';
 import {
   DEFAULT_MAX_MULTISEND_OPERATIONS,
@@ -48,7 +51,7 @@ import {
   type TokenInfo,
 } from './abiRegistry.ts';
 import { annotateCurveRouterSwapParams } from './curveRouterSwapParams.ts';
-import { formatDestinationChainInterpretation } from './chains.ts';
+import { formatDestinationChainInterpretation, getChain } from './chains.ts';
 import { reverseResolveEns } from './ensLookup.ts';
 
 const coder = AbiCoder.defaultAbiCoder();
@@ -238,7 +241,14 @@ export async function decodeCalldata(
 ): Promise<DecodedCalldataOutcome> {
   const opts: DecodeOptions =
     depth === 0 && options.tokenLookupSessionCache === undefined
-      ? { ...options, tokenLookupSessionCache: new Map<string, Promise<TokenInfo | undefined>>() }
+      ? {
+          ...options,
+          tokenLookupSessionCache: new Map<string, Promise<TokenInfo | undefined>>(),
+          remoteLookupBudget: options.remoteLookupBudget ?? {
+            remaining: MAX_REMOTE_SIGNATURE_LOOKUPS_PER_DECODE,
+            exhaustedWarned: false,
+          },
+        }
       : options;
 
   throwIfDecodeAborted(opts);
@@ -306,10 +316,7 @@ export async function decodeCalldata(
   }
 
   if (candidates.length === 0) {
-    candidates = await lookupSelector(selector, {
-      offlineMode: opts.offlineMode,
-      onError: opts.onSignatureLookupError,
-    });
+    candidates = await lookupSelector(selector, selectorLookupOptions(opts));
     throwIfDecodeAborted(opts);
   }
 
@@ -348,7 +355,7 @@ export async function decodeCalldata(
     };
   }
 
-  const scored = await scoreAndDecode(
+  let scored = await scoreAndDecode(
     candidates,
     paramsHex,
     selector,
@@ -358,6 +365,33 @@ export async function decodeCalldata(
     patternNestingDepth,
   );
   throwIfDecodeAborted(opts);
+
+  // A pasted ABI can list the selector with types that don't fit this payload (wrong overload, stale ABI).
+  // Fall back to bundled / public signatures rather than failing the whole decode.
+  if (!scored && candidates.every(c => c.source === 'user-abi')) {
+    const fallback = await lookupSelector(selector, selectorLookupOptions(opts));
+    throwIfDecodeAborted(opts);
+    if (fallback.length > 0) {
+      scored = await scoreAndDecode(
+        fallback,
+        paramsHex,
+        selector,
+        calldataBytes,
+        opts,
+        depth,
+        patternNestingDepth,
+      );
+      throwIfDecodeAborted(opts);
+      if (scored) {
+        pushDecodeWarning(opts, {
+          severity: 'warning',
+          title: 'Pasted ABI did not fit this calldata',
+          context: `Selector ${selector}: the pasted ABI lists this function, but its parameter types failed to decode the payload.`,
+          message: 'Showing the bundled / public signature instead. Check that the ABI matches the contract you are calling.',
+        });
+      }
+    }
+  }
 
   if (!scored) {
     const swapCompactFallback = await tryDecodeSwapCompactOpaque(
@@ -378,6 +412,34 @@ export async function decodeCalldata(
   }
 
   return scored;
+}
+
+/** Distinct unknown selectors one decode may send to public signature APIs (each costs up to 3 requests). */
+const MAX_REMOTE_SIGNATURE_LOOKUPS_PER_DECODE = 25;
+
+function selectorLookupOptions(opts: DecodeOptions): LookupOptions {
+  return {
+    offlineMode: opts.offlineMode || opts.bundledOnlySignatureLookup === true,
+    onError: opts.onSignatureLookupError,
+    allowNetworkLookup: () => {
+      const budget = opts.remoteLookupBudget;
+      if (!budget) return true;
+      if (budget.remaining > 0) {
+        budget.remaining--;
+        return true;
+      }
+      if (!budget.exhaustedWarned) {
+        budget.exhaustedWarned = true;
+        pushDecodeWarning(opts, {
+          severity: 'info',
+          title: 'Signature lookup limit reached',
+          context: `This decode already asked public signature databases about ${MAX_REMOTE_SIGNATURE_LOOKUPS_PER_DECODE} selectors.`,
+          message: 'Further unknown selectors were resolved from bundled signatures only, so some nested calls may stay undecoded. Paste the contract ABI to decode them.',
+        });
+      }
+      return false;
+    },
+  };
 }
 
 interface ScoredDecode {
@@ -402,6 +464,7 @@ async function scoreAndDecode(
     try {
       const decoded = tryDecode(candidate, paramsHex);
       if (!decoded) continue;
+      const encodingCheck = checkCanonicalEncoding(candidate, decoded, paramsHex);
 
       const params = await processDecodedParams(
         decoded,
@@ -423,9 +486,16 @@ async function scoreAndDecode(
         alternatives: rankSignatureAlternatives(candidates.filter(c => c !== candidate)),
         depth,
         rawCalldata: fullCalldata,
+        ...(encodingCheck.trailingHex ? { unparsedTrailingHex: encodingCheck.trailingHex } : {}),
+        ...(encodingCheck.nonCanonical ? { nonCanonicalEncoding: true } : {}),
       };
 
-      const score = computeScore(decoded, candidate);
+      // A candidate that accounts for every byte, canonically, is far likelier than one that ignores a tail
+      // (zero-arg DB entries "decode" anything) or re-encodes differently.
+      let score = computeScore(decoded, candidate);
+      if (encodingCheck.exact) score += 25;
+      if (encodingCheck.trailingHex) score -= 30;
+      if (encodingCheck.nonCanonical) score -= 30;
       scored.push({ result: { status: 'success', call }, score });
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') throw e;
@@ -465,6 +535,31 @@ function tryDecode(sig: FunctionSignature, paramsHex: string): unknown[] | null 
       return null;
     }
   }
+}
+
+/**
+ * Re-encode the decoded arguments and compare with the payload. ethers' decoder (like Solidity) ignores bytes after
+ * the arguments and masks out-of-range small ints (`uint8` word 300 → 44, bool word 2 → true); both mean what the
+ * tree shows is not everything the contract receives.
+ */
+function checkCanonicalEncoding(
+  sig: FunctionSignature,
+  decoded: readonly unknown[],
+  paramsHex: string,
+): { exact: boolean; trailingHex?: string; nonCanonical: boolean } {
+  let encoded: string;
+  try {
+    encoded = coder.encode(sig.params.map(p => p.type), decoded as unknown[]).toLowerCase();
+  } catch {
+    // Values that cannot round-trip (decoded via the tuple fallback path, exotic types): no claim either way.
+    return { exact: false, nonCanonical: false };
+  }
+  const body = paramsHex.toLowerCase();
+  if (body === encoded) return { exact: true, nonCanonical: false };
+  if (body.startsWith(encoded)) {
+    return { exact: false, trailingHex: `0x${body.slice(encoded.length)}`, nonCanonical: false };
+  }
+  return { exact: false, nonCanonical: true };
 }
 
 /**
@@ -593,9 +688,16 @@ async function processDecodedParams(
   const pattern = getKnownPattern(selector);
   const params: DecodedParam[] = [];
 
+  // Nested calldata runs against its own target, never this frame's. Batch patterns that carry the callee as a
+  // `to` / `target` argument (Safe `execTransaction`, forwarders) pass it down; everything else gets no target.
+  const childOptions: DecodeOptions = {
+    ...options,
+    callTarget: pattern ? findCallTargetArgument(sig.params, decoded) : undefined,
+  };
+
   for (let i = 0; i < sig.params.length; i++) {
     throwIfDecodeAbortedEvery(options, i);
-    const { name, type } = sig.params[i];
+    const { name, type, components } = sig.params[i];
     const raw = decoded[i];
 
     const calldataHints = pattern
@@ -606,10 +708,11 @@ async function processDecodedParams(
       raw,
       type,
       calldataHints,
-      options,
+      childOptions,
       depth,
       pattern,
       patternNestingDepth,
+      components,
     );
     throwIfDecodeAborted(options);
 
@@ -622,6 +725,7 @@ async function processDecodedParams(
   }
 
   for (const p of params) {
+    dropTimestampGuessOnAmountParam(p);
     enrichWordAlignedAddressesInParam(p, options.chainId);
   }
 
@@ -632,6 +736,41 @@ async function processDecodedParams(
   await enrichAddressNodesWithEns(params, options);
   throwIfDecodeAborted(options);
   return params;
+}
+
+/** Param names that always hold a quantity, so a 10-digit value is an amount, never a Unix time. */
+const AMOUNT_PARAM_NAME = /amount|value|wad|assets|shares|qty|quantity|balance|^_?(min|max)[A-Z_]|^_?dy$|^_?dx$/i;
+
+/** `formatUint256` guesses "Timestamp" from the value alone; the param name can rule that out. */
+function dropTimestampGuessOnAmountParam(param: DecodedParam): void {
+  const v = param.value;
+  if (v.kind === 'primitive') {
+    if (AMOUNT_PARAM_NAME.test(param.name) && v.interpretation?.startsWith('Timestamp: ')) {
+      v.interpretation = undefined;
+    }
+  } else if (v.kind === 'tuple') {
+    v.fields.forEach(dropTimestampGuessOnAmountParam);
+  } else if (v.kind === 'array') {
+    for (const el of v.elements) {
+      if (el.kind === 'tuple') el.fields.forEach(dropTimestampGuessOnAmountParam);
+    }
+  }
+}
+
+const CALL_TARGET_ARG_NAME = /^_?(to|target)$/i;
+
+/** Raw value of the `address to` / `address target` argument (the callee of the nested calldata), if any. */
+function findCallTargetArgument(
+  params: readonly { name: string; type: string }[],
+  raw: readonly unknown[],
+): string | undefined {
+  for (let i = 0; i < params.length; i++) {
+    const p = params[i];
+    if (p.type.replace(/\s/g, '') !== 'address' || !CALL_TARGET_ARG_NAME.test(p.name)) continue;
+    const v = raw[i];
+    if (typeof v === 'string') return v;
+  }
+  return undefined;
 }
 
 /** `uint` / `uint256` / … only (not `uint256[]` or tuples). */
@@ -849,12 +988,23 @@ function applyTokenContextToUintPrimitive(
   token: TokenInfo,
   /** When true, override a prior `Timestamp:` heuristic (router args can be 10-digit wei-style values). */
   fromKnownRouterAmount = false,
+  /** Unit inferred from another address in the call rather than a known parameter layout. */
+  guessed = false,
 ): void {
   if (value.kind !== 'primitive') return;
   if (!paramType.startsWith('uint') && !paramType.startsWith('int')) return;
   if (!fromKnownRouterAmount && value.interpretation?.includes('Timestamp:')) return;
+  const unverified = token.unverified === true;
+  const tokenAmount = {
+    symbol: token.symbol,
+    decimals: token.decimals,
+    ...(unverified ? { unverified: true } : {}),
+    ...(guessed ? { guessed: true } : {}),
+  };
   if (value.display === 'type(uint256).max') {
-    value.interpretation = `Unlimited ${token.symbol} approval`;
+    const sym = unverified ? `"${token.symbol}" (unverified token)` : token.symbol;
+    value.interpretation = `Unlimited ${sym} approval`;
+    value.tokenAmount = tokenAmount;
     return;
   }
   const val = BigInt(value.raw);
@@ -862,8 +1012,62 @@ function applyTokenContextToUintPrimitive(
   if (tokenAmountWholePartExceedsPlausibleDisplay(value.raw, token.decimals)) {
     return;
   }
-  const fmt = formatTokenAmount(value.raw, token.decimals, token.symbol);
-  value.interpretation = fmt.interpretation;
+  const fmt = formatTokenAmount(value.raw, token.decimals, token.symbol, { unverified });
+  value.interpretation = guessed
+    ? `${fmt.interpretation} · unit guessed from the token address in this call`
+    : fmt.interpretation;
+  value.tokenAmount = tokenAmount;
+}
+
+/**
+ * Standard ERC-20 calls whose amount is denominated in the **called contract** (transaction `to`, or the batch row
+ * `target`), never in an address argument. Value: index of the amount parameter.
+ */
+const ERC20_CALL_TARGET_AMOUNT_INDEX: Readonly<Record<string, number>> = {
+  '0xa9059cbb': 1, // transfer(address to, uint256 amount)
+  '0x095ea7b3': 1, // approve(address spender, uint256 amount)
+  '0x23b872dd': 2, // transferFrom(address from, address to, uint256 amount) — tokenId on ERC-721
+  '0x39509351': 1, // increaseAllowance(address spender, uint256 addedValue)
+  '0xa457c2d7': 1, // decreaseAllowance(address spender, uint256 subtractedValue)
+  '0xd505accf': 2, // permit(owner, spender, value, deadline, v, r, s)
+};
+
+/**
+ * ERC-20 `transfer` / `approve` / … : the token is the call target. The recipient or spender can itself be a token
+ * contract (or a contract that *claims* to be one), so address arguments must never supply the unit.
+ * Returns true for these selectors even when the target is unknown, so the generic heuristic is skipped.
+ */
+async function tryEnrichErc20CallTarget(
+  params: DecodedParam[],
+  options: DecodeOptions,
+  sig: FunctionSignature,
+): Promise<boolean> {
+  const idx = ERC20_CALL_TARGET_AMOUNT_INDEX[sig.selector.toLowerCase()];
+  if (idx === undefined) return false;
+  const amountP = params[idx];
+  if (!amountP || !isBareUintSolidityType(amountP.type)) return true;
+
+  const target = options.callTarget?.trim();
+  if (!target) {
+    amountP.fieldHint =
+      'Amount is in units of the token being called (transaction To, or the batch row target), which is not known here. Set To to see the token.';
+    return true;
+  }
+  const token = await resolveTokenInfo(target, options);
+  throwIfDecodeAborted(options);
+  if (token) {
+    applyTokenContextToUintPrimitive(amountP.type, amountP.value, token, true);
+  }
+  return true;
+}
+
+/** Address params that hold a party (recipient, spender, …), never the token an amount is denominated in. */
+const NON_TOKEN_ADDRESS_PARAM_NAME =
+  /^_?(to|from|recipient|receiver|spender|owner|operator|account|user|onbehalfof|beneficiary|sender|refundaddress|refundreceiver|delegate|delegatee|target|executor|caller|payer|payee)$/i;
+
+/** Generated names from signature DBs carry no meaning (`arg0`, `field1`). */
+function isPlaceholderParamName(name: string): boolean {
+  return /^(arg|field)\d+$/.test(name);
 }
 
 /** `address[]` or fixed `address[k]` (e.g. Curve `_route`, `_pools`). */
@@ -1323,6 +1527,10 @@ async function enrichParamsWithTokenContext(
   sig: FunctionSignature,
   depth: number,
 ): Promise<void> {
+  if (await tryEnrichErc20CallTarget(params, options, sig)) {
+    return;
+  }
+
   const skipTupleParents = new Set<DecodedParam>();
   await tryEnrichUniswapV3ExactSingleParamsTuple(params, options, sig, skipTupleParents);
   throwIfDecodeAborted(options);
@@ -1365,81 +1573,55 @@ async function enrichParamsWithTokenContext(
     return;
   }
 
-  const resolvedMap = await collectResolvedTokensFromParams(params, options);
-  throwIfDecodeAborted(options);
-  if (resolvedMap.size >= 2) {
-    return;
-  }
+  await applyGenericSingleTokenContext(params, options);
+}
 
-  let token: TokenInfo | undefined =
-    resolvedMap.size === 1 ? [...resolvedMap.values()][0] : undefined;
-  if (!token) {
-    const addressParams = params.filter(p => p.value.kind === 'address');
-    if (addressParams.length > 0) {
-      const resolved = await Promise.all(
-        addressParams.map(p =>
-          resolveTokenInfo((p.value as Extract<DecodedValue, { kind: 'address' }>).address, options),
-        ),
-      );
-      throwIfDecodeAborted(options);
-      for (const t of resolved) {
-        if (t) {
-          token = t;
-          break;
-        }
-      }
+/** Address params that are tokens by name (`token`, `asset`, `path`, …) rather than placeholders. */
+const TOKEN_ADDRESS_PARAM_NAME = /token|asset|currency|underlying|coin|^_?path$|^_?route$/i;
+
+/**
+ * Fallback for frames without a known layout: if exactly one address argument resolves as a token, show the frame's
+ * uints in that token. Party addresses (`to`, `spender`, `recipient`, …) are never used as the unit, and when the
+ * token argument's role is unknown (placeholder names from signature DBs) the label says the unit is a guess.
+ */
+async function applyGenericSingleTokenContext(fields: DecodedParam[], options: DecodeOptions): Promise<void> {
+  const candidates = fields.filter(f => !NON_TOKEN_ADDRESS_PARAM_NAME.test(f.name.replace(/\s/g, '')));
+  const resolvedMap = await collectResolvedTokensFromParams(candidates, options);
+  throwIfDecodeAborted(options);
+  if (resolvedMap.size !== 1) return;
+
+  const [tokenAddrLower, token] = [...resolvedMap.entries()][0];
+  const source = candidates.find(
+    f => f.value.kind === 'address' && f.value.address.toLowerCase() === tokenAddrLower,
+  );
+  const guessed = !source || isPlaceholderParamName(source.name) || !TOKEN_ADDRESS_PARAM_NAME.test(source.name);
+
+  for (const f of fields) {
+    // Named time fields keep their timestamp reading; everything else is shown as an amount. A 10-digit amount
+    // (1,000–2,147 of a 6-decimal token) is a much likelier reading than a date, so the token wins, and for
+    // unnamed params the date stays visible as the alternative.
+    if (TIME_PARAM_NAME.test(f.name)) continue;
+    const prior = f.value.kind === 'primitive' ? f.value.interpretation : undefined;
+    applyTokenContextToUintPrimitive(f.type, f.value, token, true, guessed);
+    if (
+      prior?.startsWith('Timestamp: ') &&
+      isPlaceholderParamName(f.name) &&
+      f.value.kind === 'primitive' &&
+      f.value.interpretation !== prior
+    ) {
+      f.value.interpretation = `${f.value.interpretation} · or, if this is a time: ${prior.slice('Timestamp: '.length)}`;
     }
   }
-
-  if (!token) return;
-
-  for (const p of params) {
-    applyTokenContextToUintPrimitive(p.type, p.value, token);
-  }
 }
+
+/** Params whose name says they hold a time (keep the timestamp reading, never a token amount). */
+const TIME_PARAM_NAME = /deadline|expir|timestamp|time$|^_?(until|after|before|validto|validafter|validuntil|start|end)$/i;
 
 async function enrichTupleWithTokenContext(
   fields: DecodedParam[],
   options: DecodeOptions,
 ): Promise<void> {
-  const byLower = new Map<string, TokenInfo>();
-  const addrs = collectDistinctAddressParamValues(fields);
-  await Promise.all(
-    addrs.map(async addr => {
-      throwIfDecodeAborted(options);
-      const t = await resolveTokenInfo(addr, options);
-      if (t) byLower.set(addr.toLowerCase(), t);
-    }),
-  );
-
-  if (byLower.size >= 2) {
-    return;
-  }
-
-  let token: TokenInfo | undefined = byLower.size === 1 ? [...byLower.values()][0] : undefined;
-  if (!token) {
-    const addressFields = fields.filter(f => f.value.kind === 'address');
-    if (addressFields.length > 0) {
-      const resolved = await Promise.all(
-        addressFields.map(f =>
-          resolveTokenInfo((f.value as Extract<DecodedValue, { kind: 'address' }>).address, options),
-        ),
-      );
-      throwIfDecodeAborted(options);
-      for (const t of resolved) {
-        if (t) {
-          token = t;
-          break;
-        }
-      }
-    }
-  }
-
-  if (!token) return;
-
-  for (const f of fields) {
-    applyTokenContextToUintPrimitive(f.type, f.value, token);
-  }
+  await applyGenericSingleTokenContext(fields, options);
 }
 
 /**
@@ -1502,10 +1684,12 @@ async function tryExpandEnsoShortcutCommandBytes(
     ) {
       continue;
     }
-    const result = await decodeCalldata(sliceHex, options, depth + 1, nextPatternNest);
+    const scanOptions = w === 0 ? options : { ...options, bundledOnlySignatureLookup: true };
+    const result = await decodeCalldata(sliceHex, scanOptions, depth + 1, nextPatternNest);
     throwIfDecodeAborted(options);
     if (result.status === 'success' || result.status === 'partial') {
-      return { kind: 'bytes', hex: cleanHex, decoded: result.call };
+      // Word 0 is the documented Enso layout; later words are an offset scan.
+      return { kind: 'bytes', hex: cleanHex, decoded: w === 0 ? result.call : { ...result.call, speculative: true } };
     }
   }
 
@@ -1567,7 +1751,9 @@ async function pickBestSwapCompactInnerCalldata(
     }
 
     const sliceHex = hexlify(slice);
-    const result = await decodeCalldata(sliceHex, options, depth + 1, nextPatternNest);
+    // Offset 0 is the natural reading; every other offset is a guess, so keep those off the public APIs.
+    const scanOptions = offset === 0 ? options : { ...options, bundledOnlySignatureLookup: true };
+    const result = await decodeCalldata(sliceHex, scanOptions, depth + 1, nextPatternNest);
     throwIfDecodeAborted(options);
     if (result.status === 'success' || result.status === 'partial') {
       cands.push({ offset, call: result.call, outcome: result.status });
@@ -1601,6 +1787,8 @@ async function convertValue(
   depth: number,
   outerPattern: MulticallPattern | undefined,
   patternNestingDepth: number,
+  /** Tuple component names from the ABI (user ABI / named bundled params), applied to tuple fields. */
+  components?: readonly SignatureParam[],
 ): Promise<DecodedValue> {
   throwIfDecodeAborted(options);
 
@@ -1633,7 +1821,7 @@ async function convertValue(
       throwIfDecodeAbortedEvery(options, fi);
       const item = raw[fi];
       elements.push(
-        await convertValue(item, innerType, calldataHints, options, depth, outerPattern, patternNestingDepth),
+        await convertValue(item, innerType, calldataHints, options, depth, outerPattern, patternNestingDepth, components),
       );
       throwIfDecodeAborted(options);
     }
@@ -1779,6 +1967,7 @@ async function convertValue(
           depth,
           outerPattern,
           patternNestingDepth,
+          components,
         ),
       );
       throwIfDecodeAborted(options);
@@ -1793,7 +1982,7 @@ async function convertValue(
       throwIfDecodeAbortedEvery(options, ai);
       const item = raw[ai];
       elements.push(
-        await convertValue(item, elemType, [], options, depth, outerPattern, patternNestingDepth),
+        await convertValue(item, elemType, [], options, depth, outerPattern, patternNestingDepth, components),
       );
       throwIfDecodeAborted(options);
     }
@@ -1810,6 +1999,7 @@ async function convertValue(
       depth,
       outerPattern,
       patternNestingDepth,
+      components,
     );
   }
 
@@ -1849,11 +2039,17 @@ async function convertTupleValue(
   depth: number,
   outerPattern: MulticallPattern | undefined,
   patternNestingDepth: number,
+  components?: readonly SignatureParam[],
 ): Promise<DecodedValue> {
   const innerTypes = splitTupleTypes(tupleType.slice(1, -1));
   const tuple = raw as readonly unknown[];
   const fields: DecodedParam[] = [];
   const fieldNames = semanticTupleFieldNames(tupleType);
+
+  // Batch rows like `(address target, bytes callData)`: inner calldata runs against `target`.
+  const rowFieldMeta = innerTypes.map((t, i) => ({ name: components?.[i]?.name || fieldNames?.[i] || '', type: t }));
+  const rowTarget = findCallTargetArgument(rowFieldMeta, tuple);
+  const fieldOptions: DecodeOptions = rowTarget ? { ...options, callTarget: rowTarget } : options;
 
   for (let i = 0; i < innerTypes.length; i++) {
     throwIfDecodeAbortedEvery(options, i);
@@ -1901,19 +2097,21 @@ async function convertTupleValue(
       }
     }
 
+    const component = components?.[i];
     const value = await convertValue(
       fieldRaw,
       fieldType,
       fieldHints,
-      options,
+      fieldOptions,
       depth,
       outerPattern,
       patternNestingDepth,
+      component?.components,
     );
     throwIfDecodeAborted(options);
 
     fields.push({
-      name: fieldNames?.[i] ?? `field${i}`,
+      name: component?.name || fieldNames?.[i] || `field${i}`,
       type: fieldType,
       value,
       rawHex: toRawHex(fieldRaw),
@@ -2011,7 +2209,7 @@ async function convertBytesValue(
         return {
           kind: 'bytes',
           hex: cleanHex,
-          decoded: bestPacked,
+          decoded: { ...bestPacked, speculative: true },
         };
       }
       // `pickBestSwapCompactInnerCalldata` already attempted a full-buffer decode at offset 0 when allowed.
@@ -2024,7 +2222,7 @@ async function convertBytesValue(
       return {
         kind: 'bytes',
         hex: cleanHex,
-        decoded: result.call,
+        decoded: isKnownCalldata ? result.call : { ...result.call, speculative: true },
       };
     }
   }
@@ -2075,10 +2273,12 @@ async function convertGnosisMultiSend(
   }
 
   let offset = 0;
+  let stoppedAtOperationCap = false;
 
   while (offset < bytes.length) {
     throwIfDecodeAbortedEvery(options, elements.length);
     if (elements.length >= maxOperations) {
+      stoppedAtOperationCap = true;
       if (offset < bytes.length) {
         pushDecodeWarning(options, {
           severity: 'warning',
@@ -2130,7 +2330,7 @@ async function convertGnosisMultiSend(
 
     const calldataDecoded =
       mayExpandPatternCalldata
-        ? await decodeCalldata(calldata, options, depth + 1, patternNestingDepth + 1)
+        ? await decodeCalldata(calldata, { ...options, callTarget: to }, depth + 1, patternNestingDepth + 1)
         : null;
     throwIfDecodeAborted(options);
 
@@ -2147,9 +2347,29 @@ async function convertGnosisMultiSend(
       fields: [
         { name: 'operation', type: 'uint8', value: { kind: 'primitive', display: multisendOpDisplay, raw: String(_operation) } },
         { name: 'to', type: 'address', value: { kind: 'address', address: to, checksummed: addrFmt.checksummed, label: addrFmt.label } },
-        { name: 'value', type: 'uint256', value: { kind: 'primitive', display: value.toString(), raw: value.toString(), interpretation: value > 0n ? `${value} wei` : undefined } },
+        {
+          name: 'value',
+          type: 'uint256',
+          value: {
+            kind: 'primitive',
+            display: value.toString(),
+            raw: value.toString(),
+            interpretation: value > 0n ? `${formatEther(value)} ${getChain(options.chainId).nativeCurrency} (native value sent with this operation)` : undefined,
+          },
+        },
         { name: 'data', type: 'bytes', value: calldataValue },
       ],
+    });
+  }
+
+  // Any other early stop means the packed layout did not parse to the end: a short row header, a `dataLength`
+  // larger than what remains, or trailing junk. Never drop those bytes silently — they may be operations.
+  if (!stoppedAtOperationCap && offset < bytes.length) {
+    pushDecodeWarning(options, {
+      severity: 'danger',
+      title: 'multiSend payload did not parse cleanly',
+      context: `While parsing Gnosis Safe \`multiSend(bytes)\` packed operations: stopped at byte ${offset} of ${bytes.length} after ${elements.length} operation(s).`,
+      message: `${bytes.length - offset} trailing byte(s) could not be read as operations (truncated row or bad length field). Do not sign a batch that does not decode completely.`,
     });
   }
 
@@ -2302,6 +2522,9 @@ export function toRawHex(val: unknown): string {
 /**
  * Decode calldata with a user JSON ABI. Reuses the same `Interface` LRU as `lookupSelectorFromUserAbi` (keyed by ABI
  * content) unless {@link DecodeWithUserAbiOptions.iface} is supplied for hot-loop use.
+ *
+ * Flat helper: one level, values stringified, no nested expansion, token context or encoding checks. The app decodes
+ * pasted ABIs through {@link decodeCalldata} with `userAbi`, which does all of that.
  */
 export interface DecodeWithUserAbiOptions {
   /** When set, skips JSON parse and shared cache (caller owns lifecycle). */
@@ -2350,9 +2573,10 @@ export function decodeWithUserAbi(
       };
     }
 
-    const params: DecodedParam[] = tx.fragment.inputs.map((input, i) => ({
-      name: input.name || `arg${i}`,
-      type: input.type,
+    const sigParams = tx.fragment.inputs.map((input, i) => paramTypeToSignatureParam(input, `arg${i}`));
+    const params: DecodedParam[] = sigParams.map((sp, i) => ({
+      name: sp.name,
+      type: sp.type,
       value: { kind: 'primitive' as const, display: String(tx.args[i]), raw: String(tx.args[i]) },
     }));
 
@@ -2364,10 +2588,7 @@ export function decodeWithUserAbi(
           selector: calldataHex.slice(0, SELECTOR_HEX_PREFIX_LENGTH) as HexSelector,
           name: tx.name,
           textSignature: tx.fragment.format('sighash'),
-          params: tx.fragment.inputs.map((i, idx) => ({
-            name: i.name || `arg${idx}`,
-            type: i.type,
-          })),
+          params: sigParams,
           source: 'user-abi',
         },
         params,

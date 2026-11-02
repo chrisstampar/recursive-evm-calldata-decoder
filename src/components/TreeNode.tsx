@@ -6,7 +6,7 @@ import type {
   DecodeConfidence,
   SignatureSource,
 } from '../types/index.ts';
-import { useChainId, useChainUi } from '../context/ChainContext.tsx';
+import { useChainId, useChainUi } from '../context/ChainContext.ts';
 import { ExplorerAddressLink } from './ExplorerAddressLink.tsx';
 import { useTreeExpansionOptional } from '../context/TreeExpansionContext.tsx';
 import { getExplorerUrl } from '../lib/chains.ts';
@@ -141,11 +141,27 @@ const TYPE_BADGE_INT_LIKE_CLASS =
 const TYPE_BADGE_FALLBACK_CLASS =
   'bg-blue-900/60 text-blue-300 border-blue-700/50' as const;
 
-const CONFIDENCE_BADGE_MAP: Record<DecodeConfidence, { label: string; className: string }> = {
-  exact: { label: 'Exact', className: 'bg-green-900/60 text-green-300 border-green-700/50' },
-  high: { label: 'High', className: 'bg-blue-900/60 text-blue-300 border-blue-700/50' },
-  ambiguous: { label: 'Ambiguous', className: 'bg-yellow-900/60 text-yellow-300 border-yellow-700/50' },
-  failed: { label: 'Failed', className: 'bg-red-900/60 text-red-300 border-red-700/50' },
+/**
+ * Labels say what the match is based on, not how sure we are: a selector match never proves the called contract
+ * implements that function, and a single public-database entry is unvetted.
+ */
+const CONFIDENCE_BADGE_MAP: Record<DecodeConfidence, { label: string; title: string; className: string }> = {
+  exact: {
+    label: 'Known ABI',
+    title: 'Selector matches a bundled or pasted ABI. This does not prove the target contract implements this function.',
+    className: 'bg-green-900/60 text-green-300 border-green-700/50',
+  },
+  high: {
+    label: 'Single match',
+    title: 'Only one public-database signature has this selector, and it decodes cleanly. Database entries are user-submitted and unvetted.',
+    className: 'bg-blue-900/60 text-blue-300 border-blue-700/50',
+  },
+  ambiguous: {
+    label: 'Ambiguous',
+    title: 'Several public-database signatures decode this payload; the best-scoring one is shown.',
+    className: 'bg-yellow-900/60 text-yellow-300 border-yellow-700/50',
+  },
+  failed: { label: 'Failed', title: 'No signature decoded this payload.', className: 'bg-red-900/60 text-red-300 border-red-700/50' },
 };
 
 const SOURCE_BADGE_CLASS_MAP: Record<SignatureSource, string> = {
@@ -445,10 +461,10 @@ function TypeBadge({ type }: TypeBadgeProps) {
 }
 
 function ConfidenceBadge({ confidence }: ConfidenceBadgeProps) {
-  const { label, className } = CONFIDENCE_BADGE_MAP[confidence];
+  const { label, title, className } = CONFIDENCE_BADGE_MAP[confidence];
 
   return (
-    <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium border shrink-0 ${className}`}>
+    <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium border shrink-0 ${className}`} title={title}>
       {label}
     </span>
   );
@@ -523,12 +539,9 @@ function ValueDisplay({
       const href = `${getExplorerUrl(chainId)}/address/${emb.checksummed}`;
       const contractLabel = getContractName(emb.checksummed, chainId);
       const showEns = !offlineMode && !skipEns && emb.ensName;
-      const primary = showEns ? emb.ensName! : emb.checksummed;
-      const linkMono = !showEns;
-      const shortHex =
-        emb.checksummed.length >= 14
-          ? `${emb.checksummed.slice(0, 6)}…${emb.checksummed.slice(-4)}`
-          : emb.checksummed;
+      // Always lead with the full address: a reverse ENS name is picked by the address owner, and shortened
+      // addresses are what address-poisoning attacks rely on.
+      const primary = emb.checksummed;
       return (
         <div className="min-w-0 space-y-1">
           <div className="min-w-0">
@@ -543,7 +556,7 @@ function ValueDisplay({
               href={href}
               target="_blank"
               rel="noopener noreferrer"
-              className={`text-sm text-purple-300 hover:text-purple-200 hover:underline break-all ${linkMono ? 'font-mono' : ''}`}
+              className={`text-sm text-purple-300 hover:text-purple-200 hover:underline break-all font-mono`}
               title={
                 showEns
                   ? `${emb.checksummed}${contractLabel ? ` · ${contractLabel}` : ''}`
@@ -555,8 +568,11 @@ function ValueDisplay({
               {primary}
             </a>
             {showEns && (
-              <span className="font-mono text-xs text-gray-500 shrink-0" title={emb.checksummed}>
-                {shortHex}
+              <span
+                className="text-xs text-gray-400 shrink-0"
+                title="Reverse ENS record: chosen by whoever controls this address. The address is what matters."
+              >
+                ENS: {emb.ensName}
               </span>
             )}
             {contractLabel && (
@@ -581,19 +597,14 @@ function ValueDisplay({
   if (value.kind === 'address') {
     const href = `${getExplorerUrl(chainId)}/address/${value.checksummed}`;
     const showEns = !offlineMode && !skipEns && value.ensName;
-    const primary = showEns ? value.ensName! : value.checksummed;
-    const linkMono = !showEns;
-    const shortHex =
-      value.checksummed.length >= 14
-        ? `${value.checksummed.slice(0, 6)}…${value.checksummed.slice(-4)}`
-        : value.checksummed;
+    const primary = value.checksummed;
     return (
       <div className="min-w-0">
         <a
           href={href}
           target="_blank"
           rel="noopener noreferrer"
-          className={`text-sm text-purple-300 hover:text-purple-200 hover:underline break-all ${linkMono ? 'font-mono' : ''}`}
+          className={`text-sm text-purple-300 hover:text-purple-200 hover:underline break-all font-mono`}
           title={
             showEns
               ? `${value.checksummed}${value.label ? ` · ${value.label}` : ''}`
@@ -605,8 +616,11 @@ function ValueDisplay({
           {primary}
         </a>
         {showEns && (
-          <span className="ml-2 font-mono text-xs text-gray-500 shrink-0" title={value.checksummed}>
-            {shortHex}
+          <span
+            className="ml-2 text-xs text-gray-400 shrink-0"
+            title="Reverse ENS record: chosen by whoever controls this address. The address is what matters."
+          >
+            ENS: {value.ensName}
           </span>
         )}
         {value.label && (
@@ -839,6 +853,22 @@ export function DecodedCallNode({
         </span>
         <ConfidenceBadge confidence={call.confidence} />
         <SourceBadge source={call.signature.source} />
+        {call.speculative && (
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded border shrink-0 bg-orange-950/50 text-orange-300 border-orange-800/50"
+            title="Found by probing opaque bytes, not a known calldata layout. It may be a coincidental match."
+          >
+            Guessed nested call
+          </span>
+        )}
+        {call.nonCanonicalEncoding && (
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded border shrink-0 bg-orange-950/50 text-orange-300 border-orange-800/50"
+            title="The arguments do not re-encode to the same bytes: some values may be shown masked."
+          >
+            Non-standard encoding
+          </span>
+        )}
         {call.alternatives.length > 0 && (
           <button
             type="button"
@@ -880,6 +910,18 @@ export function DecodedCallNode({
               autoExpandMaxDepth={autoExpandMaxDepth}
             />
           ))}
+          {call.unparsedTrailingHex && (
+            <div className="min-w-0 rounded border border-orange-900/50 bg-orange-950/20 px-2 py-1.5">
+              <div className="text-xs text-orange-300">
+                Unparsed trailing bytes ({(call.unparsedTrailingHex.length - 2) / 2}) — not part of the ABI arguments, but
+                readable by the contract
+              </div>
+              <div className="mt-0.5 flex items-start gap-1 min-w-0">
+                <span className="text-xs font-mono text-gray-400 break-all">{call.unparsedTrailingHex}</span>
+                <CopyButton text={call.unparsedTrailingHex} copyTitle="Copy trailing bytes" />
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

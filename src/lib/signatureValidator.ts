@@ -34,12 +34,14 @@ const FIXED_M_BITS = [
 const FIXED_M_SET = new Set<number>(FIXED_M_BITS);
 
 /**
- * Solidity identifier: ASCII `$` / letters / `_` / digits, or Unicode (Solidity 0.8+).
+ * Solidity (and Vyper) identifiers are ASCII only: `$` / letters / `_` / digits.
  * Used for function names, user-defined type names, and optional parameter / tuple field names.
  * Parsed separately from the parameter list via {@link splitTextSignatureParts}.
+ *
+ * Do not widen this to Unicode: signature names come from public databases anyone can write to, and invisible
+ * (ZWJ, U+034F, U+3164) or lookalike (Cyrillic `а`) characters would let a malicious selector render as `approve`.
  */
-export const SIGNATURE_IDENTIFIER_REGEX =
-  /^(?:[a-zA-Z_$][a-zA-Z0-9_$]*|\p{ID_Start}\p{ID_Continue}*)$/u;
+export const SIGNATURE_IDENTIFIER_REGEX = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/;
 
 /** @deprecated Use {@link SIGNATURE_IDENTIFIER_REGEX}; kept for call-site clarity where “function name” is meant. */
 export const SIGNATURE_FUNCTION_NAME_REGEX = SIGNATURE_IDENTIFIER_REGEX;
@@ -115,7 +117,7 @@ export function normalizeSignatureWhitespace(sig: string): string {
 
 /**
  * Split `name(params)` using the outermost matching `(`…`)` pair.
- * Avoids dotall `(.*)` and supports Unicode or `$` in `name`.
+ * Avoids dotall `(.*)`; `name` may contain `$`.
  */
 export function splitTextSignatureParts(textSignature: string): { name: string; paramsStr: string } | null {
   const s = textSignature.trim();

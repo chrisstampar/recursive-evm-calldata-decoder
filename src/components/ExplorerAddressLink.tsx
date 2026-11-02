@@ -2,14 +2,9 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { getAddress } from 'ethers';
 import { getExplorerUrl } from '../lib/chains.ts';
 import { reverseResolveEnsDetailed } from '../lib/ensLookup.ts';
-import { useChainUi } from '../context/ChainContext.tsx';
+import { useChainUi } from '../context/ChainContext.ts';
 
 const COPY_FEEDBACK_MS = 1500;
-
-function shortAddr(checksummed: string): string {
-  if (checksummed.length < 14) return checksummed;
-  return `${checksummed.slice(0, 6)}…${checksummed.slice(-4)}`;
-}
 
 export interface ExplorerAddressLinkProps {
   /** Raw or checksummed `0x` address. */
@@ -135,8 +130,8 @@ export function ExplorerAddressLink({
   const { checksummed } = parsed;
   const href = `${getExplorerUrl(chainId)}/address/${checksummed}`;
   const showEns = shouldResolveEns && Boolean(ensName);
-  const primary = showEns ? ensName : checksummed;
-  const linkMono = !showEns;
+  // Full address first; the reverse ENS name (chosen by the address owner) is a secondary tag.
+  const primary = checksummed;
 
   const displayEnsIssue = shouldResolveEns ? ensIssue : null;
   const showEnsLoading = shouldResolveEns && ensLoading;
@@ -164,7 +159,7 @@ export function ExplorerAddressLink({
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        className={`text-sm text-purple-300 hover:text-purple-200 hover:underline break-all ${linkMono ? 'font-mono' : ''}`}
+        className={`text-sm text-purple-300 hover:text-purple-200 hover:underline break-all font-mono`}
         title={linkTitle}
       >
         {primary}
@@ -191,8 +186,11 @@ export function ExplorerAddressLink({
         </span>
       ) : null}
       {showEns && (
-        <span className="font-mono text-[11px] text-gray-500 shrink-0" title={checksummed}>
-          {shortAddr(checksummed)}
+        <span
+          className="text-[11px] text-gray-400 shrink-0"
+          title="Reverse ENS record: chosen by whoever controls this address. The address is what matters."
+        >
+          ENS: {ensName}
         </span>
       )}
       {registryLabel ? (

@@ -29,6 +29,7 @@ _archive/
 
 # Internal review checklist (optional local file)
 review.md
+AUDIT-*.md
 
 # Environment and secrets
 .env

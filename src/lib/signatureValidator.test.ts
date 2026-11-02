@@ -74,10 +74,9 @@ describe('signatureValidator', () => {
     });
   });
 
-  it('accepts Unicode user-defined type identifiers (aligned with function names)', () => {
-    expect(SIGNATURE_IDENTIFIER_REGEX.test('Δ')).toBe(true);
-    expect(validateTextSignature('f(Δ)').valid).toBe(true);
-    expect(parseTextSignature('f(Δ)')).toEqual({ name: 'f', paramTypes: ['Δ'] });
+  it('rejects non-ASCII user-defined type identifiers', () => {
+    expect(SIGNATURE_IDENTIFIER_REGEX.test('Δ')).toBe(false);
+    expect(validateTextSignature('f(Δ)').valid).toBe(false);
   });
 
   it('accepts named tuple components and top-level param names; canonical form drops names', () => {
@@ -227,10 +226,16 @@ describe('signatureValidator', () => {
     });
   });
 
-  it('allows Unicode function names (Solidity 0.8+) and normalizes space before (', () => {
-    expect(SIGNATURE_FUNCTION_NAME_REGEX.test('Перевод')).toBe(true);
-    const spaced = 'Перевод (uint256)';
-    expect(normalizeSignatureWhitespace(spaced)).toBe('Перевод(uint256)');
-    expect(validateTextSignature('Перевод(uint256)').valid).toBe(true);
+  it('rejects non-ASCII function names (Solidity identifiers are ASCII) and normalizes space before (', () => {
+    expect(SIGNATURE_FUNCTION_NAME_REGEX.test('Перевод')).toBe(false);
+    expect(normalizeSignatureWhitespace('transfer (uint256)')).toBe('transfer(uint256)');
+    expect(validateTextSignature('Перевод(uint256)').valid).toBe(false);
+  });
+
+  it('rejects invisible and lookalike characters that could spoof a familiar name', () => {
+    for (const name of ['approve\u200d', 'approve\u200c', 'approve\u034f', 'approve\u3164', 'approve\ufe0f', '\u0430pprove']) {
+      expect(SIGNATURE_FUNCTION_NAME_REGEX.test(name)).toBe(false);
+      expect(validateTextSignature(`${name}(address,uint256)`).valid).toBe(false);
+    }
   });
 });

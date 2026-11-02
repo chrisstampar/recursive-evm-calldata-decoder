@@ -140,6 +140,11 @@ const KNOWN_CONTRACTS_RAW: Record<number, Record<string, ContractRegistryEntry>>
   '0x00000000000000adc04c56bf30ac9d3c0aaf14dc': { name: 'OpenSea Seaport 1.5' },
   '0xd9db270c1b5e3bd161e8c8503c55ceabee709552': { name: 'Gnosis Safe', riskLevel: 'high' },
   '0x000000000022d473030f116ddee9f6b43ac78ba3': { name: 'Permit2', riskLevel: 'critical' },
+  // Safe batching libraries — the expected DELEGATECALL targets for Safe multiSend (see warningAnalyzer).
+  '0xa238cbeb142c10ef7ad8442c6d1f9e89e07e7761': { name: 'Safe MultiSend 1.3.0', riskLevel: 'high' },
+  '0x40a2accbd92bca938b02010e17a5b8929b49130d': { name: 'Safe MultiSendCallOnly 1.3.0', riskLevel: 'high' },
+  '0x38869bf66a61cf6bdb996a6ae40d5853fd43b526': { name: 'Safe MultiSend 1.4.1', riskLevel: 'high' },
+  '0x9641d764fc13c8b624c04430c7356c1c7c8102e2': { name: 'Safe MultiSendCallOnly 1.4.1', riskLevel: 'high' },
 
   // Curve Finance
   '0x45312ea0eff7e09c83cbe249fa1d7598c4c8cd4e': { name: 'Curve Finance Router v1.2', riskLevel: 'high' },
@@ -339,6 +344,11 @@ const KNOWN_CONTRACTS_RAW: Record<number, Record<string, ContractRegistryEntry>>
 export interface TokenInfo {
   symbol: string;
   decimals: number;
+  /**
+   * Set for metadata read from the token contract (`symbol()` / `decimals()`): anyone can deploy a contract that
+   * calls itself "USDC". Registry entries leave this unset.
+   */
+  unverified?: true;
 }
 
 /** In-memory `decimals()` / `symbol()` results; bounded by TTL + max size for long-lived tabs / wallets. */
@@ -406,9 +416,19 @@ function setCachedOnChainDecimals(ck: string, info: TokenInfo, now: number): voi
   ON_CHAIN_DECIMALS_CACHE.set(ck, { info, ts: now });
 }
 
+/** Addresses whose `decimals()` reverted or returned nothing (not ERC-20s), with the time seen. */
+const ON_CHAIN_NOT_A_TOKEN = new Map<string, number>();
+
+/** ethers errors that mean the call reached the chain and failed there (revert, no code, undecodable return). */
+function isDefinitiveCallFailure(reason: unknown): boolean {
+  const code = (reason as { code?: unknown } | null)?.code;
+  return code === 'CALL_EXCEPTION' || code === 'BAD_DATA';
+}
+
 /** Clears on-chain token metadata cache (Vitest / dev only). */
 export function clearOnChainDecimalsCacheForTests(): void {
   ON_CHAIN_DECIMALS_CACHE.clear();
+  ON_CHAIN_NOT_A_TOKEN.clear();
 }
 
 /**
@@ -444,6 +464,15 @@ function raceWithTimeout<T>(promise: Promise<T>, ms: number, signal?: AbortSigna
       e => finish(() => reject(e)),
     );
   });
+}
+
+/**
+ * On-chain `symbol()` is chosen by whoever deployed the contract. Keep printable ASCII only so invisible,
+ * bidi-override and lookalike characters cannot make it read as a different token.
+ */
+function sanitizeUntrustedTokenSymbol(sym: string): string {
+  const ascii = sym.replace(/[^\x21-\x7e]/g, '');
+  return sanitizeDecodedString(ascii, MAX_ON_CHAIN_SYMBOL_CHARS);
 }
 
 /** ASCII from left-padded bytes32 symbol; stops at first `\\0`. */
@@ -501,6 +530,8 @@ export async function fetchOnChainTokenDecimals(
   const now0 = Date.now();
   const cached = getCachedOnChainDecimals(ck, now0);
   if (cached) return cached;
+  const notTokenAt = ON_CHAIN_NOT_A_TOKEN.get(ck);
+  if (notTokenAt !== undefined && now0 - notTokenAt < ON_CHAIN_DECIMALS_TTL_MS) return undefined;
 
   const chain = CHAINS[chainId];
   if (!chain?.rpcs?.length) return undefined;
@@ -525,7 +556,19 @@ export async function fetchOnChainTokenDecimals(
         }
       }
 
-      if (settled[0].status !== 'fulfilled') continue;
+      if (settled[0].status !== 'fulfilled') {
+        // A revert or empty return is the chain's answer ("not an ERC-20"), not an RPC failure: asking the other
+        // endpoints would only repeat it (and hold the decode for several timeouts).
+        if (isDefinitiveCallFailure(settled[0].reason)) {
+          if (ON_CHAIN_NOT_A_TOKEN.size >= ON_CHAIN_DECIMALS_MAX_ENTRIES) {
+            const oldest = ON_CHAIN_NOT_A_TOKEN.keys().next().value;
+            if (oldest !== undefined) ON_CHAIN_NOT_A_TOKEN.delete(oldest);
+          }
+          ON_CHAIN_NOT_A_TOKEN.set(ck, Date.now());
+          return undefined;
+        }
+        continue;
+      }
 
       const raw = settled[0].value as unknown;
       const n = typeof raw === 'bigint' ? Number(raw) : Number(raw);
@@ -535,7 +578,7 @@ export async function fetchOnChainTokenDecimals(
       if (settled[1].status === 'fulfilled') {
         const sym = settled[1].value as unknown;
         if (typeof sym === 'string') {
-          const cleaned = sanitizeDecodedString(sym.trim(), MAX_ON_CHAIN_SYMBOL_CHARS);
+          const cleaned = sanitizeUntrustedTokenSymbol(sym);
           if (cleaned.length > 0) symbol = cleaned;
         }
       }
@@ -544,7 +587,7 @@ export async function fetchOnChainTokenDecimals(
         if (b32) symbol = b32;
       }
 
-      const info: TokenInfo = { symbol, decimals: n };
+      const info: TokenInfo = { symbol, decimals: n, unverified: true };
       setCachedOnChainDecimals(ck, info, Date.now());
       return info;
     } catch (e) {
@@ -838,6 +881,12 @@ const BUNDLED_SIGNATURES: FunctionSignature[] = [
   { selector: '0xdd62ed3e', name: 'allowance', textSignature: 'allowance(address,address)', params: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }], source: 'bundled' },
   { selector: '0x18160ddd', name: 'totalSupply', textSignature: 'totalSupply()', params: [], source: 'bundled' },
   { selector: '0xd505accf', name: 'permit', textSignature: 'permit(address,address,uint256,uint256,uint8,bytes32,bytes32)', params: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }, { name: 'value', type: 'uint256' }, { name: 'deadline', type: 'uint256' }, { name: 'v', type: 'uint8' }, { name: 'r', type: 'bytes32' }, { name: 's', type: 'bytes32' }], source: 'bundled' },
+  // DAI-style permit: `allowed = true` grants an unlimited allowance.
+  { selector: '0x8fcbaf0c', name: 'permit', textSignature: 'permit(address,address,uint256,uint256,bool,uint8,bytes32,bytes32)', params: [{ name: 'holder', type: 'address' }, { name: 'spender', type: 'address' }, { name: 'nonce', type: 'uint256' }, { name: 'expiry', type: 'uint256' }, { name: 'allowed', type: 'bool' }, { name: 'v', type: 'uint8' }, { name: 'r', type: 'bytes32' }, { name: 's', type: 'bytes32' }], source: 'bundled' },
+  // Uniswap Permit2 (0x000000000022D473030F116dDEE9F6B43aC78BA3): allowance amounts are uint160 (max = unlimited).
+  { selector: '0x87517c45', name: 'approve', textSignature: 'approve(address,address,uint160,uint48)', params: [{ name: 'token', type: 'address' }, { name: 'spender', type: 'address' }, { name: 'amount', type: 'uint160' }, { name: 'expiration', type: 'uint48' }], source: 'bundled' },
+  { selector: '0x2b67b570', name: 'permit', textSignature: 'permit(address,((address,uint160,uint48,uint48),address,uint256),bytes)', params: [{ name: 'owner', type: 'address' }, { name: 'permitSingle', type: '((address,uint160,uint48,uint48),address,uint256)', components: [{ name: 'details', type: '(address,uint160,uint48,uint48)', components: [{ name: 'token', type: 'address' }, { name: 'amount', type: 'uint160' }, { name: 'expiration', type: 'uint48' }, { name: 'nonce', type: 'uint48' }] }, { name: 'spender', type: 'address' }, { name: 'sigDeadline', type: 'uint256' }] }, { name: 'signature', type: 'bytes' }], source: 'bundled' },
+  { selector: '0x2a2d80d1', name: 'permit', textSignature: 'permit(address,((address,uint160,uint48,uint48)[],address,uint256),bytes)', params: [{ name: 'owner', type: 'address' }, { name: 'permitBatch', type: '((address,uint160,uint48,uint48)[],address,uint256)', components: [{ name: 'details', type: '(address,uint160,uint48,uint48)[]', components: [{ name: 'token', type: 'address' }, { name: 'amount', type: 'uint160' }, { name: 'expiration', type: 'uint48' }, { name: 'nonce', type: 'uint48' }] }, { name: 'spender', type: 'address' }, { name: 'sigDeadline', type: 'uint256' }] }, { name: 'signature', type: 'bytes' }], source: 'bundled' },
 
   // ERC721
   { selector: '0x42842e0e', name: 'safeTransferFrom', textSignature: 'safeTransferFrom(address,address,uint256)', params: [{ name: 'from', type: 'address' }, { name: 'to', type: 'address' }, { name: 'tokenId', type: 'uint256' }], source: 'bundled' },
@@ -858,9 +907,9 @@ const BUNDLED_SIGNATURES: FunctionSignature[] = [
   { selector: '0x18cbafe5', name: 'swapExactTokensForETH', textSignature: 'swapExactTokensForETH(uint256,uint256,address[],address,uint256)', params: [{ name: 'amountIn', type: 'uint256' }, { name: 'amountOutMin', type: 'uint256' }, { name: 'path', type: 'address[]' }, { name: 'to', type: 'address' }, { name: 'deadline', type: 'uint256' }], source: 'bundled' },
 
   // Uniswap V3 SwapRouter
-  { selector: '0x414bf389', name: 'exactInputSingle', textSignature: 'exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))', params: [{ name: 'params', type: '(address,address,uint24,address,uint256,uint256,uint256,uint160)' }], source: 'bundled' },
-  { selector: '0xc04b8d59', name: 'exactInput', textSignature: 'exactInput((bytes,address,uint256,uint256,uint256))', params: [{ name: 'params', type: '(bytes,address,uint256,uint256,uint256)' }], source: 'bundled' },
-  { selector: '0xdb3e2198', name: 'exactOutputSingle', textSignature: 'exactOutputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))', params: [{ name: 'params', type: '(address,address,uint24,address,uint256,uint256,uint256,uint160)' }], source: 'bundled' },
+  { selector: '0x414bf389', name: 'exactInputSingle', textSignature: 'exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))', params: [{ name: 'params', type: '(address,address,uint24,address,uint256,uint256,uint256,uint160)', components: [{ name: 'tokenIn', type: 'address' }, { name: 'tokenOut', type: 'address' }, { name: 'fee', type: 'uint24' }, { name: 'recipient', type: 'address' }, { name: 'deadline', type: 'uint256' }, { name: 'amountIn', type: 'uint256' }, { name: 'amountOutMinimum', type: 'uint256' }, { name: 'sqrtPriceLimitX96', type: 'uint160' }] }], source: 'bundled' },
+  { selector: '0xc04b8d59', name: 'exactInput', textSignature: 'exactInput((bytes,address,uint256,uint256,uint256))', params: [{ name: 'params', type: '(bytes,address,uint256,uint256,uint256)', components: [{ name: 'path', type: 'bytes' }, { name: 'recipient', type: 'address' }, { name: 'deadline', type: 'uint256' }, { name: 'amountIn', type: 'uint256' }, { name: 'amountOutMinimum', type: 'uint256' }] }], source: 'bundled' },
+  { selector: '0xdb3e2198', name: 'exactOutputSingle', textSignature: 'exactOutputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))', params: [{ name: 'params', type: '(address,address,uint24,address,uint256,uint256,uint256,uint160)', components: [{ name: 'tokenIn', type: 'address' }, { name: 'tokenOut', type: 'address' }, { name: 'fee', type: 'uint24' }, { name: 'recipient', type: 'address' }, { name: 'deadline', type: 'uint256' }, { name: 'amountOut', type: 'uint256' }, { name: 'amountInMaximum', type: 'uint256' }, { name: 'sqrtPriceLimitX96', type: 'uint160' }] }], source: 'bundled' },
 
   // Uniswap Universal Router
   { selector: '0x3593564c', name: 'execute', textSignature: 'execute(bytes,bytes[],uint256)', params: [{ name: 'commands', type: 'bytes' }, { name: 'inputs', type: 'bytes[]' }, { name: 'deadline', type: 'uint256' }], source: 'bundled', popularity: 100 },

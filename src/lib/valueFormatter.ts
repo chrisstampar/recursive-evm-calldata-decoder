@@ -37,6 +37,12 @@ const INTEGER_DISPLAY_FORMAT = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 0,
 });
 
+/** Human token amounts (`1,500 USDC`): grouped so magnitude is readable at a glance. Raw `display` stays plain. */
+const GROUPED_INTEGER_FORMAT = new Intl.NumberFormat('en-US', {
+  useGrouping: true,
+  maximumFractionDigits: 0,
+});
+
 /**
  * Parse a decimal or `0x`-prefixed hex integer string. Returns null if empty, whitespace-only, or not a valid integer
  * literal for `BigInt` (e.g. fractional `"1.5"`, garbage `"abc"`).
@@ -154,11 +160,22 @@ function sanitizeTokenSymbol(symbol: string): string {
  * Human-readable token amount. `symbol` is trimmed, control characters removed, and capped for safe UI text; if nothing
  * remains, the label **`TOKEN`** is used.
  */
-export function formatTokenAmount(raw: string, decimals: number, symbol: string): {
+export function formatTokenAmount(
+  raw: string,
+  decimals: number,
+  symbol: string,
+  /** Symbol came from the token contract, not the registry: quote it, say so, and never add a USD peg. */
+  opts?: { unverified?: boolean },
+): {
   display: string;
   interpretation: string;
 } {
-  const sym = sanitizeTokenSymbol(symbol);
+  const unverified = opts?.unverified === true;
+  const sym = unverified ? `"${sanitizeTokenSymbol(symbol)}"` : sanitizeTokenSymbol(symbol);
+  const withPeg = (interpretation: string): string =>
+    unverified
+      ? `${interpretation} (unverified token: name and decimals set by the contract itself)`
+      : appendStableUsdPegClause(interpretation, raw, decimals, sym);
   const value = tryParseBigInt(raw);
   if (value === null) {
     return {
@@ -196,7 +213,7 @@ export function formatTokenAmount(raw: string, decimals: number, symbol: string)
     const interpretation = `${formatIntegerDecimalStringPlain(str)} ${sym}`;
     return {
       display: formatted,
-      interpretation: appendStableUsdPegClause(interpretation, raw, decimals, sym),
+      interpretation: withPeg(interpretation),
     };
   }
 
@@ -210,7 +227,7 @@ export function formatTokenAmount(raw: string, decimals: number, symbol: string)
     const interpretation = `${readable} ${sym}`;
     return {
       display: formatted,
-      interpretation: appendStableUsdPegClause(interpretation, raw, decimals, sym),
+      interpretation: withPeg(interpretation),
     };
   }
 
@@ -219,7 +236,7 @@ export function formatTokenAmount(raw: string, decimals: number, symbol: string)
   const interpretation = `0.${trimmedFrac} ${sym}`;
   return {
     display: formatted,
-    interpretation: appendStableUsdPegClause(interpretation, raw, decimals, sym),
+    interpretation: withPeg(interpretation),
   };
 }
 
@@ -351,15 +368,15 @@ function formatBigIntPlain(value: bigint): string {
   return INTEGER_DISPLAY_FORMAT.format(value);
 }
 
-/** Plain digits for integer part; preserves an optional fractional suffix (fractional segment left as-is). */
+/** Grouped digits for the integer part; preserves an optional fractional suffix (fractional segment left as-is). */
 function formatIntegerDecimalStringPlain(str: string): string {
   const parts = str.split('.');
   const intRaw = parts[0];
   if (intRaw === '') {
-    parts[0] = INTEGER_DISPLAY_FORMAT.format(0n);
+    parts[0] = GROUPED_INTEGER_FORMAT.format(0n);
   } else {
     try {
-      parts[0] = INTEGER_DISPLAY_FORMAT.format(BigInt(intRaw));
+      parts[0] = GROUPED_INTEGER_FORMAT.format(BigInt(intRaw));
     } catch {
       parts[0] = intRaw;
     }

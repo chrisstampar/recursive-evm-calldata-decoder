@@ -10,6 +10,11 @@ const ENS_SETTLED_CACHE_MAX = 256;
 const ENS_PER_RPC_ATTEMPTS = 3;
 const ENS_RETRY_BASE_DELAY_MS = 200;
 const ENS_RETRY_MAX_DELAY_MS = 3000;
+/**
+ * Upper bound on one address's lookup across all RPCs and retries. ENS is a nicety and the decode waits for it, so a
+ * failing endpoint (CORS-blocked, rate-limited) must not hold the whole result for 15+ s.
+ */
+const ENS_TOTAL_BUDGET_MS = 5000;
 
 const ZERO_LOWER = '0x0000000000000000000000000000000000000000';
 
@@ -142,7 +147,9 @@ async function lookupEnsOnMainnetDetailed(
           }
           return { status: 'resolved', name: trimmed };
         }
-        continue outer;
+        // A successful null is an answer (no verified reverse record), not an RPC failure: asking every other
+        // endpoint the same question only multiplies requests for the most common case.
+        break outer;
       } catch (e) {
         if (e instanceof DOMException && e.name === 'AbortError') throw e;
         if (attempt < ENS_PER_RPC_ATTEMPTS - 1) {
@@ -166,11 +173,19 @@ function getEnsResolvePromise(
     return Promise.resolve(settledEntryToStatus(cached));
   }
 
+  // The shared lookup must not depend on any one caller's AbortSignal: a decode that joins a lookup started by a
+  // since-aborted decode would otherwise inherit its AbortError. Each caller races its own signal instead.
   let pending = ensLookupPromises.get(key);
   if (pending === undefined) {
     pending = (async () => {
       try {
-        const st = await lookupEnsOnMainnetDetailed(checksummed, signal);
+        let budgetTimer: ReturnType<typeof setTimeout> | undefined;
+        const st = await Promise.race([
+          lookupEnsOnMainnetDetailed(checksummed, undefined),
+          new Promise<EnsReverseResolveStatus>(resolve => {
+            budgetTimer = setTimeout(() => resolve({ status: 'rpc_unavailable' }), ENS_TOTAL_BUDGET_MS);
+          }),
+        ]).finally(() => clearTimeout(budgetTimer));
         applySettledCache(st, key);
         return st;
       } catch (e) {
@@ -185,7 +200,26 @@ function getEnsResolvePromise(
     });
     ensLookupPromises.set(key, pending);
   }
-  return pending;
+  return raceWithSignal(pending, signal);
+}
+
+function raceWithSignal<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new DOMException('The operation was aborted.', 'AbortError'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      v => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(v);
+      },
+      e => {
+        signal.removeEventListener('abort', onAbort);
+        reject(e);
+      },
+    );
+  });
 }
 
 /**

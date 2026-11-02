@@ -6,6 +6,7 @@
 import { LRUCache } from 'lru-cache';
 import { z } from 'zod';
 import { getChain, DEFAULT_CHAIN_ID } from './chains';
+import { verifyRpcTransaction, type TxIntegrity } from './txIntegrity.ts';
 
 /** From `vite.config.ts` `define` → package.json `version`. */
 const APP_VERSION = __PACKAGE_VERSION__;
@@ -185,6 +186,13 @@ export interface TxInfo {
   to: string | null;
   value: string;
   isPending: boolean;
+  /**
+   * `verified`: the response re-hashes to the requested hash (calldata and `from` are authentic).
+   * `unverifiable`: envelope type or fields could not be rebuilt (L2 system txs, partial RPC responses).
+   */
+  integrity: TxIntegrity;
+  /** Host of the RPC that answered. */
+  rpcHost?: string;
 }
 
 /** Fields passed to the decoder UI when a tx hash fetch produced the calldata (e.g. native-transfer detection). */
@@ -331,9 +339,17 @@ async function fetchWithTimeout(
   }
 }
 
-function txInfoFromResult(tx: EthTransaction, displayHash: string): TxInfo {
+/** @throws {TxIntegrityError} when the response provably is not the requested transaction. */
+function txInfoFromResult(tx: EthTransaction, displayHash: string, rpcHash: string, endpoint?: string): TxInfo {
+  const integrity = verifyRpcTransaction(tx, rpcHash);
   const rawInput = tx.input?.trim() ?? '';
   const calldata = rawInput === '' || rawInput === '0x' ? '0x' : rawInput;
+  let rpcHost: string | undefined;
+  try {
+    rpcHost = endpoint ? new URL(endpoint).host : undefined;
+  } catch {
+    rpcHost = undefined;
+  }
   return {
     hash: displayHash,
     calldata,
@@ -341,6 +357,8 @@ function txInfoFromResult(tx: EthTransaction, displayHash: string): TxInfo {
     to: tx.to,
     value: tx.value,
     isPending: tx.blockNumber === null,
+    integrity,
+    ...(rpcHost ? { rpcHost } : {}),
   };
 }
 
@@ -418,7 +436,7 @@ async function readTxFromSuccessfulResponse(
   }
 
   const tx = parseEthTransactionResult(d.result);
-  return txInfoFromResult(tx, displayHash);
+  return txInfoFromResult(tx, displayHash, rpcHash, ctx.endpoint);
 }
 
 async function tryEndpointOnce(
@@ -601,7 +619,7 @@ async function tryEndpointBatchGetTxInfos(
 
     try {
       const tx = parseEthTransactionResult(item.result);
-      out.set(rpcHash, txInfoFromResult(tx, displayHash));
+      out.set(rpcHash, txInfoFromResult(tx, displayHash, rpcHash, endpoint));
     } catch {
       continue;
     }
