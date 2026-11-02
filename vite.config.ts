@@ -24,6 +24,9 @@ const base = '/';
 function manualReactVendorChunk(id: string): string | undefined {
   if (id.includes('node_modules/react-dom/')) return 'react-vendor';
   if (id.includes('node_modules/react/')) return 'react-vendor';
+  // ethers (+ its noble/hash deps) is most of the app's weight and changes rarely: separate, long-cacheable chunk.
+  if (id.includes('node_modules/ethers/') || id.includes('node_modules/@noble/') || id.includes('node_modules/@adraffy/'))
+    return 'ethers-vendor';
 }
 
 export default defineConfig({
