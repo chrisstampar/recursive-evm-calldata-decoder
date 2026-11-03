@@ -24,13 +24,13 @@ export function AddressBookPanel({ onClose }: { onClose: () => void }) {
     'rounded-lg bg-gray-900 border border-gray-700 px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none';
 
   return (
-    <section className="rounded-xl border border-gray-800 bg-gray-900/30 p-4 sm:p-6 space-y-4" aria-labelledby="address-book-heading">
+    <section className="space-y-4" aria-labelledby="address-book-heading">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 id="address-book-heading" className="text-sm font-medium text-gray-300">
+          <h2 id="address-book-heading" className="text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400">
             Address book
           </h2>
-          <p className="mt-1 text-xs text-gray-500 max-w-2xl">
+          <p className="mt-2 text-xs text-gray-500 max-w-2xl">
             Save your own wallets and the addresses you send to. Decoded addresses that start and end like one of them but
             are different get a warning, which is how address-poisoning scams are caught. Saved in this browser only.
           </p>

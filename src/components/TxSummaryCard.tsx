@@ -96,8 +96,8 @@ export function TxSummaryCard({
   if (steps.length === 0) return null;
 
   return (
-    <section className="rounded-xl border border-gray-800 bg-gray-900/30 p-4 sm:p-6" aria-labelledby="tx-summary-heading">
-      <h2 id="tx-summary-heading" className="text-sm font-medium text-gray-400 mb-3">
+    <section aria-labelledby="tx-summary-heading">
+      <h2 id="tx-summary-heading" className="text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 mb-4">
         {heading}
       </h2>
       <ol className="space-y-2">

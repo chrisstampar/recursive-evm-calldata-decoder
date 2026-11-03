@@ -23,6 +23,7 @@ function DomainRows({ ctx }: { ctx: SigningContext }) {
     rows.push(['Safe version', ctx.versionLabel]);
     rows.push(['Nonce', ctx.nonce]);
   } else {
+    rows.push(['Message type', <span key="type" className="font-mono">{ctx.primaryType}</span>]);
     for (const [k, v] of Object.entries(ctx.domain)) {
       if (k === 'verifyingContract' && typeof v === 'string') {
         rows.push([
@@ -70,15 +71,15 @@ export function SigningHashesCard({ ctx }: { ctx: SigningContext }) {
       ? 'Safe transaction hashes'
       : ctx.safeNonce !== undefined
         ? 'Safe transaction signature'
-        : `Signature request: ${ctx.primaryType}`;
+        : 'Signature request';
 
   return (
-    <section className="rounded-xl border border-gray-800 bg-gray-900/30 p-4 sm:p-6 space-y-4" aria-labelledby="signing-heading">
+    <section className="space-y-4" aria-labelledby="signing-heading">
       <div>
-        <h2 id="signing-heading" className="text-sm font-medium text-gray-400">
+        <h2 id="signing-heading" className="text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400">
           {title}
         </h2>
-        <p className="mt-1 text-xs text-gray-500">
+        <p className="mt-2 text-xs text-gray-500">
           Worked out in your browser. Before you sign, check that your wallet or hardware device shows the same hashes.
         </p>
       </div>
@@ -90,7 +91,7 @@ export function SigningHashesCard({ ctx }: { ctx: SigningContext }) {
               {r.label}
             </dt>
             <dd
-              className={`font-mono text-sm break-all rounded px-1 -mx-1 ${match?.label === r.label ? 'bg-green-950/60 text-green-200' : 'text-gray-100'}`}
+              className={`font-mono text-sm break-words rounded px-1 -mx-1 ${match?.label === r.label ? 'bg-green-950/60 text-green-200' : 'text-gray-100'}`}
             >
               {grouped(r.value)}
             </dd>

@@ -21,7 +21,7 @@ function NativeTransferSummary({ row, chain }: { row: NativeTransferResult; chai
   const ethExact = formatEther(wei);
 
   return (
-    <div className="rounded-lg border border-gray-700/50 bg-gray-800/30 px-3 py-2 text-xs text-gray-400 space-y-1">
+    <div className="text-xs text-gray-400 space-y-1">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-gray-500">Tx:</span>
         <a
@@ -318,7 +318,7 @@ export function DecodeTree({ result, autoExpandMaxDepth, shareUrl, synthetic }: 
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
-        <h3 className="text-sm font-medium text-gray-400">
+        <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400">
           {isError
             ? 'Decode failed'
             : isNativeTransfer
@@ -399,16 +399,16 @@ export function DecodeTree({ result, autoExpandMaxDepth, shareUrl, synthetic }: 
       </div>
 
       {isError ? (
-        <div className="rounded-lg border border-red-500/30 bg-red-950/20 p-4">
+        <div>
           <div className="flex items-center gap-2 mb-2">
             <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <h4 className="text-sm font-semibold text-red-400">Could not decode</h4>
           </div>
-          <p className="text-sm text-red-300/70">{result.error}</p>
+          <p className="text-sm text-red-300">{result.error}</p>
           {result.selector && (
-            <p className="mt-2 text-xs text-red-300/50 font-mono">
+            <p className="mt-2 text-xs text-gray-400 font-mono">
               Selector: {result.selector}
             </p>
           )}
@@ -421,9 +421,7 @@ export function DecodeTree({ result, autoExpandMaxDepth, shareUrl, synthetic }: 
         </div>
       ) : isNativeTransfer ? (
         <>
-          <div className="rounded-lg border border-sky-500/25 bg-sky-950/20 p-4">
-            <p className="text-sm text-sky-200/90 leading-relaxed">{result.message}</p>
-          </div>
+          <p className="text-sm text-gray-300 leading-relaxed">{result.message}</p>
           <NativeTransferSummary row={result} chain={chain} />
           {showJson && (
             <pre className="text-xs font-mono text-gray-400 bg-gray-900/50 rounded-lg p-4 overflow-x-auto max-h-[600px] overflow-y-auto border border-gray-800">
@@ -434,22 +432,18 @@ export function DecodeTree({ result, autoExpandMaxDepth, shareUrl, synthetic }: 
       ) : (
         <>
           {result.status === 'partial' && (
-            <div className="rounded-lg border border-yellow-500/30 bg-yellow-950/20 p-3">
-              <p className="text-xs text-yellow-400">
-                Partial decode: {joinPartialDecodeErrors(result.errors)}
-              </p>
-            </div>
+            <p className="text-xs text-yellow-300">
+              Partial decode: {joinPartialDecodeErrors(result.errors)}
+            </p>
           )}
 
           {getKnownPattern(result.call.selector)?.requiresSpecialHandling && (
-            <div className="rounded-lg border border-amber-500/25 bg-amber-950/15 p-3">
-              <p className="text-xs text-amber-200/90 leading-relaxed">
-                This function uses <span className="font-mono text-amber-100/95">non-standard packed encoding</span>{' '}
-                for part of the calldata (e.g. Gnosis Safe <span className="font-mono">multiSend</span>: 1-byte
-                operation + 20-byte address + 32-byte value + 32-byte length + variable <span className="font-mono">data</span>).
-                The decoder follows that layout; truncated or malformed blobs may show partial segments only.
-              </p>
-            </div>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              This function uses <span className="font-mono text-gray-300">non-standard packed encoding</span>{' '}
+              for part of the calldata (e.g. Gnosis Safe <span className="font-mono">multiSend</span>: 1-byte
+              operation + 20-byte address + 32-byte value + 32-byte length + variable <span className="font-mono">data</span>).
+              The decoder follows that layout; truncated or malformed blobs may show partial segments only.
+            </p>
           )}
 
           {showJson ? (

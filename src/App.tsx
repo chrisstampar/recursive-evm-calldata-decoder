@@ -75,12 +75,10 @@ function searchWithChain(chainId: number): string {
   }
 }
 
-/** The last decode and the settings it ran with, so a chain / Offline / ENS toggle re-runs it with the same input. */
+/** The last decode and its chain, so a chain / Offline / ENS toggle re-runs it with the same input. */
 interface LastDecode {
   request: DecodeRequest;
   chainId: number;
-  offlineMode: boolean;
-  skipEns: boolean;
   /** Waiting for the chain the input names to be selected before it runs. */
   pending?: boolean;
 }
@@ -159,7 +157,7 @@ function ResultPanels({
         </section>
       )}
 
-      <section className="rounded-xl border border-gray-800 bg-gray-900/30 p-4 sm:p-6 overflow-x-auto min-w-0">
+      <section className="overflow-x-auto min-w-0">
         <ErrorBoundary>
           <DecodeTree
             result={result}
@@ -246,11 +244,11 @@ export default function App() {
     // then runs this request, after the chain switch has cancelled whatever was in flight.
     const decodeChainId = request.chainId ?? chainId;
     if (decodeChainId !== chainId) {
-      lastDecodeRef.current = { request, chainId: decodeChainId, offlineMode, skipEns, pending: true };
+      lastDecodeRef.current = { request, chainId: decodeChainId, pending: true };
       setChainId(decodeChainId);
       return;
     }
-    lastDecodeRef.current = { request, chainId, offlineMode, skipEns };
+    lastDecodeRef.current = { request, chainId };
 
     const { calldata, abi, msgValueWei, txTo, txFetchContext, typedData } = request;
     const extraWarnings = request.extraWarnings ?? [];
@@ -388,7 +386,6 @@ export default function App() {
         if (last.chainId === chainId) void handleDecode(last.request, offlineMode);
         return;
       }
-      if (last.chainId === chainId && last.offlineMode === offlineMode && last.skipEns === skipEns) return;
       const boundToChain = Boolean(last.request.txFetchContext) || last.request.chainId !== undefined;
       if (boundToChain && last.chainId !== chainId) {
         lastDecodeRef.current = null;
@@ -432,7 +429,7 @@ export default function App() {
     <ChainProvider value={chainUi}>
       <AddressBookProvider>
         <div className="min-h-screen bg-gray-950">
-          <div className="max-w-6xl mx-auto px-2 sm:px-4 py-6 sm:py-10">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
             <header className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
               <div className="min-w-0">
                 <h1 className="text-2xl sm:text-3xl font-bold text-gray-50 tracking-tight">
@@ -458,9 +455,9 @@ export default function App() {
               </div>
             </header>
 
-            <main className="space-y-6">
+            <main className="divide-y divide-gray-800 *:py-7 *:first:pt-0">
               {addressBookOpen && <AddressBookPanel onClose={() => setAddressBookOpen(false)} />}
-              <section className={`rounded-xl border border-gray-800 bg-gray-900/30 ${inputCollapsed ? 'px-4 py-3 sm:px-6' : 'p-4 sm:p-6'}`}>
+              <section aria-label="Input">
                 <CalldataInput
                   collapsed={inputCollapsed}
                   onExpand={() => setInputCollapsed(false)}
@@ -521,7 +518,7 @@ export default function App() {
               )}
 
               {!result && !isLoading && (
-                <section className="rounded-xl border border-gray-800/50 bg-gray-900/20 p-6 sm:p-8">
+                <section className="py-10">
                   <div className="text-center">
                     <div className="text-4xl mb-4 opacity-20">{ '{...}' }</div>
                     <h3 className="text-sm font-medium text-gray-500 mb-2">Paste calldata, a transaction, or a signature request to get started</h3>

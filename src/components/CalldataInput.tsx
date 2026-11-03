@@ -131,7 +131,7 @@ function OptionalToContextBar({ addressInput, chain }: { addressInput: string; c
   }
   const label = getContractName(trimmed, chain.id);
   return (
-    <div className="rounded-lg border border-gray-700/50 bg-gray-800/30 px-3 py-2 text-xs text-gray-400">
+    <div className="text-xs text-gray-400">
       <span className="text-gray-500">Call target: </span>
       <ExplorerAddressLink
         key={trimmed}
@@ -201,7 +201,7 @@ function TxInfoBar({ txInfo, chain }: { txInfo: TxInfo; chain: ChainConfig }) {
   const ethExact = formatEther(weiValue);
 
   return (
-    <div className="rounded-lg border border-gray-700/50 bg-gray-800/30 px-3 py-2 text-xs text-gray-400 space-y-1">
+    <div className="text-xs text-gray-400 space-y-1">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-gray-500">Tx:</span>
         <a
@@ -265,7 +265,7 @@ function TxInfoBar({ txInfo, chain }: { txInfo: TxInfo; chain: ChainConfig }) {
           </span>
         )}
       </div>
-      <div className="flex items-center gap-2 flex-wrap pt-1.5 mt-1 border-t border-gray-700/50">
+      <div className="flex items-center gap-2 flex-wrap pt-1">
         <span className="text-gray-500 shrink-0">Calldata</span>
         <span className="font-mono text-gray-500 truncate min-w-0 max-w-[min(100%,280px)]" title={txInfo.calldata}>
           {calldataPreview || '(empty)'}
@@ -339,6 +339,8 @@ export function CalldataInput({
     if (initialCalldata != null && initialCalldata !== '') {
       setHasReceivedUrlCalldata(true);
       setCalldata(initialCalldata);
+      // A #calldata link decodes as calldata, whichever tab was open.
+      setInputMode('calldata');
     } else if (initialCalldata === null && hasReceivedUrlCalldata) {
       setCalldata('');
     }
@@ -396,10 +398,12 @@ export function CalldataInput({
     };
   }, []);
 
+  // Tab switches cancel in their click handler, so a #calldata link that selects the Calldata tab doesn't cancel its
+  // own decode.
   useEffect(() => {
     txFetchAbortRef.current?.abort();
     onAbortInFlightDecode?.();
-  }, [chainId, inputMode, onAbortInFlightDecode]);
+  }, [chainId, onAbortInFlightDecode]);
 
   const handleDecode = useCallback(async () => {
     setError(null);
@@ -700,6 +704,10 @@ export function CalldataInput({
             aria-pressed={inputMode === m.id}
             aria-label={m.aria}
             onClick={() => {
+              if (m.id !== inputMode) {
+                txFetchAbortRef.current?.abort();
+                onAbortInFlightDecode?.();
+              }
               if (inputMode === 'calldata') calldataDraftRef.current = calldata;
               if (m.id === 'calldata') {
                 const d = calldataDraftRef.current;
@@ -780,6 +788,7 @@ export function CalldataInput({
                 type="button"
                 className="underline underline-offset-2 hover:text-amber-200"
                 onClick={() => {
+                  onAbortInFlightDecode?.();
                   calldataDraftRef.current = calldata;
                   if (calldataHint.mode === 'typed') setTypedText(calldata);
                   else setRawTxText(calldata.trim());

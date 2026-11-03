@@ -54,7 +54,7 @@ export function SignedTxInfo({ tx, chainId }: { tx: ParsedSignedTx; chainId: num
   if (tx.hash) rows.push(['Hash', <span key="hash" className="font-mono break-all">{tx.hash}</span>]);
 
   return (
-    <dl className="rounded-lg border border-gray-700/50 bg-gray-800/30 px-3 py-2 text-xs grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+    <dl className="text-xs grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
       {rows.map(([k, v]) => (
         <div key={k} className="contents">
           <dt className="text-gray-500">{k}</dt>
