@@ -3,6 +3,7 @@ import { getAddress } from 'ethers';
 import { getExplorerUrl } from '../lib/chains.ts';
 import { reverseResolveEnsDetailed } from '../lib/ensLookup.ts';
 import { useChainUi } from '../context/ChainContext.ts';
+import { useAddressBook } from '../context/AddressBookContext.tsx';
 
 const COPY_FEEDBACK_MS = 1500;
 
@@ -196,6 +197,7 @@ export function ExplorerAddressLink({
       {registryLabel ? (
         <span className="text-purple-400/70 text-[11px] font-medium shrink-0">({registryLabel})</span>
       ) : null}
+      <AddressBookTag address={checksummed} />
       {showCopy ? (
         <button
           type="button"
@@ -225,4 +227,32 @@ export function ExplorerAddressLink({
       ) : null}
     </span>
   );
+}
+
+/** Your saved name for this address, or a look-alike alarm when it imitates one of your saved addresses. */
+export function AddressBookTag({ address, className = '' }: { address: string; className?: string }) {
+  const book = useAddressBook();
+  const saved = book.saved(address);
+  const imitates = saved ? undefined : book.imitates(address);
+  if (saved) {
+    return (
+      <span
+        className={`text-[11px] px-1.5 rounded border bg-green-950/50 text-green-200 border-green-800/60 shrink-0 ${className}`}
+        title="In your address book (saved in this browser)"
+      >
+        Yours: {saved.label}
+      </span>
+    );
+  }
+  if (imitates) {
+    return (
+      <span
+        className={`text-[11px] px-1.5 rounded border bg-red-950/60 text-red-200 border-red-800/60 font-medium shrink-0 ${className}`}
+        title={`${address} is not your ${imitates.address}`}
+      >
+        Look-alike of {imitates.label}
+      </span>
+    );
+  }
+  return null;
 }

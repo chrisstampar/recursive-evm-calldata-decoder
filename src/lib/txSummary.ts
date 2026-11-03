@@ -82,7 +82,10 @@ function amountParts(
 ): SummaryPart[] {
   if (v?.kind !== 'primitive') return [text('?')];
   if (v.interpretation && !v.interpretation.startsWith('Timestamp: ')) {
-    const { headline } = splitInterpretation(v.interpretation);
+    // "Unlimited USDC approval" reads as a heading; mid-sentence it is "spend unlimited USDC".
+    const headline = splitInterpretation(v.interpretation)
+      .headline.replace(/^Unlimited (.+) approval$/, 'unlimited $1')
+      .replace(/^Unlimited /, 'unlimited ');
     const ta = v.tokenAmount;
     const caution = ta?.unverified ? 'symbol and decimals set by the token contract' : ta?.guessed ? 'unit guessed' : undefined;
     return [{ kind: 'amount', text: headline, ...(caution ? { caution } : {}) }];
@@ -133,6 +136,43 @@ function permit2Parts(f: Map<string, DecodedParam>, chainId: number): SummaryPar
     }
   });
   return parts;
+}
+
+/** " until 1 Jan 2030" for a deadline read as a timestamp; nothing otherwise. */
+function until(v: DecodedValue | undefined): SummaryPart[] {
+  if (v?.kind === 'primitive' && v.interpretation?.startsWith('Timestamp: ')) {
+    return [text(` until ${splitInterpretation(v.interpretation).headline}`)];
+  }
+  return [];
+}
+
+function isZeroAddress(v: DecodedValue): boolean {
+  return v.kind === 'address' && /^0x0{40}$/i.test(v.address);
+}
+
+/** Seaport offer or consideration items: token amounts, NFTs by id, and (for consideration) who is paid. */
+function seaportItems(v: DecodedValue | undefined, chainId: number, withRecipient: boolean): SummaryPart[] | null {
+  if (v?.kind !== 'array') return null;
+  if (v.elements.length === 0) return [text('nothing')];
+  return v.elements.flatMap((item, i) => {
+    if (item.kind !== 'tuple') return [];
+    const f = new Map(item.fields.map(x => [x.name, x] as const));
+    const type = get(f, 'itemType');
+    const kind = type?.kind === 'primitive' ? Number(type.raw) : -1;
+    const token = get(f, 'token');
+    const parts: SummaryPart[] = i > 0 ? [text(', ')] : [];
+    if (kind === 0 || kind === 1) {
+      parts.push(...amountParts(get(f, 'startAmount'), chainId, kind === 0 ? undefined : token, kind === 0 ? 'wei of the native coin' : undefined));
+    } else {
+      const id = get(f, 'identifierOrCriteria');
+      const ap = addressPart(token, chainId);
+      parts.push(text(kind >= 4 ? 'any NFT from ' : 'NFT '), ...(ap ? [ap] : []));
+      if (kind < 4 && id?.kind === 'primitive') parts.push(text(` #${id.display}`));
+    }
+    const recipient = withRecipient ? addressPart(get(f, 'recipient'), chainId) : undefined;
+    if (recipient) parts.push(text(' to '), recipient);
+    return parts;
+  });
 }
 
 /** Input and output token of a swap, in trade order, from a v3 path or a v2 `address[]` path. */
@@ -269,6 +309,52 @@ function recipe(call: DecodedCall, chainId: number): SummaryPart[] | null {
       if (to) return join(text(delegate ? 'Safe DELEGATECALL into ' : 'Safe transaction to '), to, text(':'));
       break;
     }
+    // EIP-712 messages, decoded as a call named after their primary type (see typedData.ts).
+    case 'Permit': {
+      const allowed = get(f, 'allowed');
+      if (allowed?.kind === 'primitive') {
+        return allowed.raw === 'true'
+          ? join(text('Let '), a(get(f, 'spender')), text(' spend any amount of this token'), until(get(f, 'expiry')))
+          : join(text('Remove the allowance of '), a(get(f, 'spender')));
+      }
+      if (f.has('value')) return join(text('Let '), a(get(f, 'spender')), text(' spend '), amt(get(f, 'value')), until(get(f, 'deadline')));
+      break;
+    }
+    case 'PermitSingle':
+    case 'PermitBatch':
+      return permit2Parts(f, chainId);
+    case 'PermitTransferFrom':
+    case 'PermitWitnessTransferFrom':
+    case 'PermitBatchTransferFrom':
+    case 'PermitBatchWitnessTransferFrom': {
+      const permitted = get(f, 'permitted');
+      const rows = permitted?.kind === 'array' ? permitted.elements : permitted ? [permitted] : [];
+      const amounts = rows.flatMap((row, i) => {
+        if (row.kind !== 'tuple') return [];
+        const rf = new Map(row.fields.map(x => [x.name, x] as const));
+        return [...(i > 0 ? [text(' and ')] : []), ...amountParts(get(rf, 'amount'), chainId, get(rf, 'token'))];
+      });
+      if (amounts.length === 0) break;
+      return join(text('Permit2: let '), a(get(f, 'spender')), text(' take '), amounts, text(' once'), until(get(f, 'deadline')));
+    }
+    case 'OrderComponents': {
+      const offer = seaportItems(get(f, 'offer'), chainId, false);
+      const consideration = seaportItems(get(f, 'consideration'), chainId, true);
+      if (!offer || !consideration) break;
+      return [text('Seaport order: give '), ...offer, text(' for '), ...consideration];
+    }
+    case 'Order':
+      if (f.has('sellToken') && f.has('buyAmount')) {
+        const receiver = get(f, 'receiver');
+        return join(
+          text('CoW order: sell '),
+          amt(get(f, 'sellAmount'), get(f, 'sellToken')),
+          text(' for at least '),
+          amt(get(f, 'buyAmount'), get(f, 'buyToken')),
+          ...(receiver && !isZeroAddress(receiver) ? [text(' → '), a(receiver)] : []),
+        );
+      }
+      break;
   }
   if (/swap/i.test(name)) return swapParts(f, chainId);
   return null;

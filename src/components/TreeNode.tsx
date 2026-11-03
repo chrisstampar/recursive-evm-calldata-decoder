@@ -12,7 +12,7 @@ import { callNodeDomId } from '../lib/callTree.ts';
 import { splitInterpretation } from '../lib/valueFormatter.ts';
 import { useChainId, useChainUi } from '../context/ChainContext.ts';
 import { classifyTrailingData } from '../lib/trailingData.ts';
-import { ExplorerAddressLink } from './ExplorerAddressLink.tsx';
+import { AddressBookTag, ExplorerAddressLink } from './ExplorerAddressLink.tsx';
 import { useTreeExpansionOptional } from '../context/TreeExpansionContext.tsx';
 import { getExplorerUrl } from '../lib/chains.ts';
 import { getContractName } from '../lib/abiRegistry.ts';
@@ -172,6 +172,7 @@ const CONFIDENCE_BADGE_MAP: Record<DecodeConfidence, { label: string; title: str
 const SOURCE_BADGE_CLASS_MAP: Record<SignatureSource, string> = {
   bundled: 'text-green-500',
   'user-abi': 'text-green-400',
+  'typed-data': 'text-green-400',
   sourcify: 'text-cyan-400',
   openchain: 'text-blue-400',
   '4byte': 'text-gray-400',
@@ -693,6 +694,7 @@ function ValueDisplay({
         {value.label && (
           <span className="ml-2 text-xs text-purple-400/70 font-medium">({value.label})</span>
         )}
+        <AddressBookTag address={value.checksummed} className="ml-2" />
         <CopyButton text={value.checksummed} copyTitle="Copy checksummed address" />
       </div>
     );

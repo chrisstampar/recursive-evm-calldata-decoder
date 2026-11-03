@@ -65,7 +65,7 @@ describe('summarizeTransaction', () => {
       callTarget: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
     });
     if (approve.status !== 'success') throw new Error('decode');
-    expect(line(summarizeTransaction(approve.call, 1).steps[0])).toBe('Approve Uniswap Universal Router v2 to spend Unlimited USDT approval');
+    expect(line(summarizeTransaction(approve.call, 1).steps[0])).toBe('Approve Uniswap Universal Router v2 to spend unlimited USDT');
   });
 
   it('falls back to the function name with addresses and amounts', async () => {

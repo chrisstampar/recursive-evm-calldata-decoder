@@ -25,6 +25,10 @@ A **client-side** web tool that recursively decodes Ethereum transaction calldat
 - **Router plans** -- Uniswap Universal Router commands and v4 actions (`V4_SWAP` → swap / settle / take), and Enso weiroll shortcuts (each step's target, function and call type) are spelled out instead of shown as opaque bytes
 - **Hidden-data checks** -- Bytes after the ABI arguments are shown and classified (ERC-8021 builder codes, Across integrator IDs, short frontend tags vs. long unexplained tails); non-canonical encodings are flagged
 - **Transaction hash lookup** -- Paste a tx hash instead of raw calldata; the tool fetches calldata from public Ethereum RPCs
+- **Signed transactions** -- Paste a serialized transaction (`cast mktx`, a wallet export): every field is shown, the sender recovered from the signature, and the calldata decoded on the transaction's own chain. EIP-7702 account delegations and transactions without replay protection get warnings
+- **Signature requests (EIP-712)** -- Paste the typed data a wallet asks you to sign. Permits, Permit2 (allowance and signature transfers), Seaport orders, CoW orders, and Safe transactions get a plain-language reading and warnings (unlimited or long-lived access, a listing that pays you nothing); the domain hash, message hash, and signed hash are shown so you can check them against a hardware wallet
+- **Safe transaction hashes** -- Enter a Safe transaction as the Safe app lists it (or read the Safe's nonce and version from chain) to get its domain hash, message hash, and safeTxHash, with a box that tells you whether the hash your wallet shows matches. The transaction is decoded as the `execTransaction` it would run
+- **Address book and look-alike warnings** -- Save your own addresses (in this browser only). They are labelled wherever they appear, and an address that starts and ends like one of them but is different gets a danger warning, which is how address poisoning is caught
 - **3-tier signature resolution** -- Bundled ABIs (instant) -> [openchain.xyz](https://openchain.xyz) -> [4byte.directory](https://www.4byte.directory) as fallback
 - **Token-aware formatting** -- When sibling parameters include **known token addresses**, adjacent `uint256` amounts use that token’s decimals and symbol (and, for configured stablecoins, an approximate USD peg line where applicable)
 - **Smart value interpretation** -- The readable value leads (token amounts, dates, "no limit") with the raw number underneath; Uniswap v3 paths decode to tokens and pool fees; EIP-55 checksummed addresses with explorer links, known contract labels, timestamp detection, max-uint256 detection, zero address labeling, router sentinels (`MSG_SENDER`, `CONTRACT_BALANCE`, native-coin placeholders)
@@ -78,7 +82,7 @@ npm run preview
 
 The live site is a static build pinned to IPFS and served through the `recdec.eth` ENS name.
 
-1. `npm run build:ipfs` — same checks as `build`, with relative asset paths so the site works from any gateway path.
+1. `npm run build:ipfs` — same checks as `build`, with relative asset paths so the site works from any gateway path, and without source maps (the source is public; they would make the upload about five times larger).
 2. Upload the whole `dist/` folder to the pinning service (Pinata) as a directory and note the root CID.
 3. Check it on a gateway before switching: `https://<CID>.ipfs.dweb.link/` should load and decode a sample.
 4. In the ENS manager, set `recdec.eth`'s **Content hash** to `ipfs://<CID>` (an on-chain transaction from the owner wallet).
@@ -122,9 +126,14 @@ src/
 │   ├── knownPatterns.ts    # Multicall pattern definitions
 │   ├── valueFormatter.ts   # Human-readable value formatting
 │   ├── sanitize.ts         # Input validation, output sanitization
-│   └── txFetcher.ts        # Ethereum RPC transaction fetcher
+│   ├── txFetcher.ts        # Ethereum RPC transaction fetcher
+│   ├── txSummary.ts        # Plain-language summary lines
+│   ├── rawTx.ts            # Serialized transactions (sender recovery, EIP-7702)
+│   ├── typedData.ts        # EIP-712 parsing, hashing, and decoding
+│   ├── safeHash.ts         # Safe domain / message / safeTxHash
+│   └── addressBook.ts      # Saved addresses and look-alike checks
 ├── components/
-│   ├── CalldataInput.tsx   # Input form (calldata + tx hash modes)
+│   ├── CalldataInput.tsx   # Input form (calldata, tx hash, signed tx, typed data, Safe tx)
 │   ├── DecodeTree.tsx      # Result display with tree/JSON toggle
 │   ├── TreeNode.tsx        # Recursive tree node rendering
 │   └── ErrorBoundary.tsx   # React error boundary
@@ -143,6 +152,7 @@ For **private vulnerability reports**, see [SECURITY.md](SECURITY.md).
 - **Tx-hash integrity** -- A fetched transaction is re-hashed locally and must match the requested hash, so an RPC cannot substitute calldata
 - **Hidden data surfaced** -- Bytes after the ABI arguments, non-canonical encodings and malformed Safe `multiSend` rows are shown with warnings
 - **Safe operations** -- DELEGATECALLs in `execTransaction` / `multiSend` get explicit warnings
+- **Local hashes** -- Signed-transaction senders, EIP-712 hashes, and Safe hashes are computed in the browser, never taken from a service; the Safe hash is tested against a safeTxHash a mainnet Safe logged on chain
 - **No framing** -- The app refuses to render inside another page (clickjacking)
 - **Content Security Policy** -- Strict CSP via meta tag restricting scripts, styles, and network connections to known endpoints
 - **Input validation** -- Strict hex format validation with size limits before any processing

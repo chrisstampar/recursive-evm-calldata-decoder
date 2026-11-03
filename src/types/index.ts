@@ -1,6 +1,6 @@
 import type { TokenInfo } from '../lib/abiRegistry.ts';
 
-export type SignatureSource = 'bundled' | 'sourcify' | 'openchain' | '4byte' | 'user-abi';
+export type SignatureSource = 'bundled' | 'sourcify' | 'openchain' | '4byte' | 'user-abi' | 'typed-data';
 
 /**
  * Function selector: `0x` plus four bytes of hex (10 characters total).

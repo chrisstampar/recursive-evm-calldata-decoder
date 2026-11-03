@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import type { DecodedCall, UniswapV3Path } from '../types/index.ts';
 import { useChainId } from '../context/ChainContext.ts';
+import { useAddressBook } from '../context/AddressBookContext.tsx';
 import { getExplorerUrl } from '../lib/chains.ts';
 import { summarizeTransaction, type SummaryPart } from '../lib/txSummary.ts';
 
@@ -9,16 +10,34 @@ function formatFee(fee: number): string {
 }
 
 function AddressText({ address, label, chainId }: { address: string; label?: string; chainId: number }) {
+  const book = useAddressBook();
+  const saved = book.saved(address);
+  const imitates = saved ? undefined : book.imitates(address);
+  const href = `${getExplorerUrl(chainId)}/address/${address}`;
+  if (imitates) {
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-mono text-[0.8125rem] text-red-300 underline decoration-wavy break-all"
+        title={`Look-alike of your saved ${imitates.address} (${imitates.label})`}
+      >
+        {address} (look-alike of {imitates.label})
+      </a>
+    );
+  }
   // Unlabelled addresses are shown in full: shortened ones are what address-poisoning look-alikes rely on.
+  const shown = saved ? `${saved.label} (yours)` : label;
   return (
     <a
-      href={`${getExplorerUrl(chainId)}/address/${address}`}
+      href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className={label ? 'text-purple-300 hover:underline' : 'font-mono text-[0.8125rem] text-purple-300 hover:underline break-all'}
+      className={shown ? 'text-purple-300 hover:underline' : 'font-mono text-[0.8125rem] text-purple-300 hover:underline break-all'}
       title={address}
     >
-      {label ?? address}
+      {shown ?? address}
     </a>
   );
 }
@@ -63,7 +82,15 @@ function Part({ part, chainId }: { part: SummaryPart; chainId: number }) {
 }
 
 /** "What this transaction does": one plain-language line per step, each linking to its node in the tree. */
-export function TxSummaryCard({ call, onShowInTree }: { call: DecodedCall; onShowInTree: (callIndex: number) => void }) {
+export function TxSummaryCard({
+  call,
+  onShowInTree,
+  heading = 'What this transaction does',
+}: {
+  call: DecodedCall;
+  onShowInTree: (callIndex: number) => void;
+  heading?: string;
+}) {
   const chainId = useChainId();
   const { steps, omitted } = useMemo(() => summarizeTransaction(call, chainId), [call, chainId]);
   if (steps.length === 0) return null;
@@ -71,7 +98,7 @@ export function TxSummaryCard({ call, onShowInTree }: { call: DecodedCall; onSho
   return (
     <section className="rounded-xl border border-gray-800 bg-gray-900/30 p-4 sm:p-6" aria-labelledby="tx-summary-heading">
       <h2 id="tx-summary-heading" className="text-sm font-medium text-gray-400 mb-3">
-        What this transaction does
+        {heading}
       </h2>
       <ol className="space-y-2">
         {steps.map((step, i) => (

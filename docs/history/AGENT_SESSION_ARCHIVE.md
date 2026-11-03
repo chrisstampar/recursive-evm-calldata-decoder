@@ -858,3 +858,17 @@ file. Oldest first. Also in git history, and summarised in SHKG session records.
 _2026-11-02: about 36 checkpoint entries from unrelated Cursor chats run in this folder (3D printing,
 Instar, hardware) were removed from here; a full copy of the earlier file is in the gitignored_
 _`_archive/AGENT_SESSION_ARCHIVE.2026-11-02.md`._
+
+### 2026-11-02 — Claude Code onboarding + context cleanup
+
+- Claude Code took over as lead dev. Installed deps, verified lint / types / tests / build.
+- Rewrote this file: it had filled with SHKG checkpoint entries from unrelated Cursor chats run in
+  this folder (3D printing, Instar, M5 order). Old copy kept at
+  `_archive/AGENT_SESSION_CONTEXT.2026-11-02.md` (gitignored).
+- Also removed the 36 off-topic entries from the tracked `docs/history/AGENT_SESSION_ARCHIVE.md`
+  (kept the Clear Signing and live-site entries, rewritten cleanly). Full prior copy:
+  `_archive/AGENT_SESSION_ARCHIVE.2026-11-02.md`.
+- Commits `b0a6e2f` (history cleanup) and `d3160c6` (CI: checkout + setup-node v4 → v7, clears the
+  Node 20 deprecation warning) pushed to `rad` and `origin`; CI green. GitHub mirror is caught up.
+- If off-topic entries come back, the source is Cursor's handoff hook
+  (`selfhosted/scripts/cursor-memory/handoff.ts`), which writes every chat into the open workspace's file.

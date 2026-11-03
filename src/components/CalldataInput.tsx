@@ -6,8 +6,22 @@ import { formatEther, getAddress } from 'ethers';
 import { CHAIN_LIST, getChain, type ChainConfig } from '../lib/chains.ts';
 import { useChainUi } from '../context/ChainContext.ts';
 import { ExplorerAddressLink } from './ExplorerAddressLink.tsx';
+import { SafeTxForm, type SafeFormState } from './SafeTxForm.tsx';
+import { SignedTxInfo } from './SignedTxInfo.tsx';
+import type { DecodeRequest } from '../lib/decodeRequest.ts';
+import { decodeChainFor, looksLikeSerializedTx, parseSerializedTransaction, serializedTxWarnings, type ParsedSignedTx } from '../lib/rawTx.ts';
+import { parseTypedData, typedDataToDecodeInput } from '../lib/typedData.ts';
+import { EMPTY_SAFE_TX, SAFE_VERSION_RANGES, computeSafeTxHashes, safeTxAsExecCalldata } from '../lib/safeHash.ts';
 
-type InputMode = 'calldata' | 'txhash';
+type InputMode = 'calldata' | 'txhash' | 'rawtx' | 'typed' | 'safe';
+
+const MODES: { id: InputMode; label: string; aria: string }[] = [
+  { id: 'calldata', label: 'Calldata', aria: 'Calldata input mode' },
+  { id: 'txhash', label: 'Tx hash', aria: 'Transaction hash input mode' },
+  { id: 'rawtx', label: 'Signed tx', aria: 'Signed or unsigned serialized transaction input mode' },
+  { id: 'typed', label: 'Typed data', aria: 'EIP-712 typed data signature request input mode' },
+  { id: 'safe', label: 'Safe tx', aria: 'Safe transaction hash check input mode' },
+];
 
 const TX_INFO_CLIPBOARD_FEEDBACK_MS = 1500;
 
@@ -88,15 +102,7 @@ interface CalldataInputProps {
    * Prefer a stable reference (e.g. `useCallback` in the parent) so `handleDecode` and
    * keyboard shortcuts do not churn every render.
    */
-  onDecode: (
-    calldata: string,
-    abi: string | undefined,
-    offlineMode: boolean,
-    msgValueWei?: string,
-    txTo?: string | null,
-    /** Set when calldata came from “Transaction hash” fetch (enables native-transfer summary without decoding `0x`). */
-    txFetchContext?: TxFetchContext | null,
-  ) => void;
+  onDecode: (request: DecodeRequest, offlineMode: boolean) => void;
   /** Cancel an in-flight `decodeCalldata` when the user switches calldata / tx-hash mode or chain (parent owns `AbortController`). */
   onAbortInFlightDecode?: () => void;
   isLoading: boolean;
@@ -307,6 +313,13 @@ export function CalldataInput({
   const [abiJson, setAbiJson] = useState('');
   const [txInfo, setTxInfo] = useState<TxInfo | null>(null);
   const [isFetchingTx, setIsFetchingTx] = useState(false);
+  const [rawTxText, setRawTxText] = useState('');
+  /** Last pasted transaction that parsed (shown above the result). */
+  const [rawTx, setRawTx] = useState<ParsedSignedTx | null>(null);
+  const [typedText, setTypedText] = useState('');
+  /** One line describing the last decoded typed data, for the collapsed input. */
+  const [typedSummary, setTypedSummary] = useState<string | null>(null);
+  const [safeForm, setSafeForm] = useState<SafeFormState>({ safeAddress: '', version: '1.3+', tx: EMPTY_SAFE_TX });
 
   /** Last calldata textarea value for calldata mode (preserved when switching to tx-hash and back). */
   const calldataDraftRef = useRef(calldata);
@@ -390,6 +403,113 @@ export function CalldataInput({
 
   const handleDecode = useCallback(async () => {
     setError(null);
+    const abiOrError = (): string | undefined | false => {
+      const abi = showAbi && abiJson.trim() ? abiJson.trim() : undefined;
+      if (abi && !isValidAbiJson(abi)) {
+        setError('Invalid ABI JSON format. Paste a JSON array of ABI fragment objects.');
+        return false;
+      }
+      return abi;
+    };
+
+    if (inputMode === 'rawtx') {
+      let tx: ParsedSignedTx;
+      try {
+        tx = parseSerializedTransaction(rawTxText);
+      } catch (e) {
+        setRawTx(null);
+        setError(e instanceof Error ? e.message : 'Could not read that transaction.');
+        return;
+      }
+      setRawTx(tx);
+      setTxInfo(null);
+      const abi = abiOrError();
+      if (abi === false) return;
+      const decodeChain = decodeChainFor(tx, chainId);
+      const warnings = serializedTxWarnings(tx, decodeChain);
+      if (!tx.to) {
+        setError('This transaction deploys a contract; its data is contract code, not a function call, so there is nothing to decode.');
+        return;
+      }
+      onDecodeRef.current(
+        {
+          calldata: tx.data,
+          abi,
+          msgValueWei: tx.value,
+          txTo: tx.to,
+          txFetchContext: { hash: tx.hash ?? '', from: tx.from ?? '', to: tx.to, value: tx.value, isPending: false },
+          chainId: decodeChain,
+          extraWarnings: warnings,
+          from: tx.from,
+        },
+        offlineMode,
+      );
+      return;
+    }
+
+    if (inputMode === 'typed') {
+      try {
+        const td = parseTypedData(typedText);
+        const input = typedDataToDecodeInput(td);
+        const decodeChain = td.chainId !== undefined && CHAIN_LIST.some(c => c.id === td.chainId) ? td.chainId : chainId;
+        const domainName = typeof td.domain.name === 'string' ? ` · ${td.domain.name}` : '';
+        setTypedSummary(`${td.primaryType}${domainName}`);
+        setTxInfo(null);
+        onDecodeRef.current(
+          {
+            calldata: input.calldata,
+            abi: input.abi,
+            msgValueWei: input.safeTx?.value,
+            txTo: input.callTarget ?? null,
+            chainId: decodeChain,
+            typedData: td,
+            signing: {
+              kind: 'typed-data',
+              primaryType: td.primaryType,
+              domain: td.domain,
+              hashes: td.hashes,
+              ...(input.safeTx ? { safeNonce: input.safeTx.nonce } : {}),
+            },
+            kind: 'signature',
+          },
+          offlineMode,
+        );
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Could not read that typed data.');
+      }
+      return;
+    }
+
+    if (inputMode === 'safe') {
+      const abi = abiOrError();
+      if (abi === false) return;
+      try {
+        const safeAddress = getAddress(safeForm.safeAddress.trim());
+        const hashes = computeSafeTxHashes(chainId, safeAddress, safeForm.version, safeForm.tx);
+        setTxInfo(null);
+        onDecodeRef.current(
+          {
+            calldata: safeTxAsExecCalldata(safeForm.tx),
+            abi,
+            txTo: safeAddress,
+            chainId,
+            signing: {
+              kind: 'safe',
+              safeAddress,
+              chainId,
+              versionLabel: SAFE_VERSION_RANGES.find(v => v.id === safeForm.version)?.label ?? safeForm.version,
+              nonce: BigInt(safeForm.tx.nonce.trim()).toString(),
+              hashes,
+            },
+          },
+          offlineMode,
+        );
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Check the Safe transaction fields.';
+        setError(/invalid address|bad address checksum/i.test(msg) ? 'Safe address is not a valid address.' : msg);
+      }
+      return;
+    }
 
     if (inputMode === 'txhash') {
       if (!isValidTxHash(txHash)) {
@@ -424,7 +544,10 @@ export function CalldataInput({
           value: info.value,
           isPending: info.isPending,
         };
-        onDecodeRef.current(info.calldata, abi, offlineMode, info.value, info.to, ctx);
+        onDecodeRef.current(
+          { calldata: info.calldata, abi, msgValueWei: info.value, txTo: info.to, txFetchContext: ctx, from: info.from },
+          offlineMode,
+        );
       } catch (e) {
         if (e instanceof DOMException && e.name === 'AbortError') return;
         setError(e instanceof Error ? e.message : 'Failed to fetch transaction');
@@ -461,7 +584,7 @@ export function CalldataInput({
     }
 
     setTxInfo(null);
-    onDecodeRef.current(result.normalized, abi, offlineMode, undefined, txToOptional, null);
+    onDecodeRef.current({ calldata: result.normalized, abi, txTo: txToOptional }, offlineMode);
   }, [
     inputMode,
     calldata,
@@ -472,7 +595,20 @@ export function CalldataInput({
     optionalContractTo,
     chainId,
     schedulePersistCalldataDraft,
+    rawTxText,
+    typedText,
+    safeForm,
   ]);
+
+  /** Calldata box holding something else: say which tab reads it. */
+  const calldataHint = useMemo((): { text: string; mode: InputMode } | null => {
+    const t = calldata.trim();
+    if (t.startsWith('{') || t.startsWith('[')) return { text: 'This looks like typed data (JSON).', mode: 'typed' };
+    if (t.length > 10 && validateHexInput(t).valid && looksLikeSerializedTx(t)) {
+      return { text: 'This also reads as a serialized transaction.', mode: 'rawtx' };
+    }
+    return null;
+  }, [calldata]);
 
   const currentlyLoading = isLoading || isFetchingTx;
 
@@ -485,8 +621,8 @@ export function CalldataInput({
     (e: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       if (e.key !== 'Enter') return;
       const id = (e.target as HTMLElement).id;
-      if (id === 'abi-input') return;
-      if (id === 'calldata-input' && e.shiftKey) return;
+      if (id === 'abi-input' || id === 'typed-input') return;
+      if ((id === 'calldata-input' || id === 'rawtx-input') && e.shiftKey) return;
       if (currentlyLoading) return;
       e.preventDefault();
       void handleDecode();
@@ -509,26 +645,47 @@ export function CalldataInput({
   }, [optionalContractTo]);
 
   if (collapsed && !currentlyLoading) {
-    const shown = txInfo ? txInfo.hash : calldata.trim();
+    let kind: string;
+    let shown: string;
+    if (inputMode === 'rawtx' && rawTx) {
+      kind = `${rawTx.from ? 'Signed' : 'Unsigned'} transaction`;
+      shown = rawTx.hash ?? rawTxText.trim();
+    } else if (inputMode === 'typed' && typedSummary) {
+      kind = 'Signature request';
+      shown = typedSummary;
+    } else if (inputMode === 'safe') {
+      kind = 'Safe transaction';
+      shown = `${safeForm.safeAddress.trim()} · nonce ${safeForm.tx.nonce.trim()}`;
+    } else if (txInfo) {
+      kind = 'Transaction';
+      shown = txInfo.hash;
+    } else {
+      kind = 'Calldata';
+      shown = calldata.trim();
+    }
     return (
-      <div className="flex items-center gap-3 flex-wrap min-w-0">
-        <div className="min-w-0 flex-1">
-          <p className="text-xs text-gray-500">
-            {txInfo ? 'Transaction' : 'Calldata'} on {currentChain.name}
-            {!txInfo && shown && ` · ${hexByteCount(shown)} bytes`}
-            {offlineMode && ' · offline'}
-          </p>
-          <p className="font-mono text-sm text-gray-300 truncate" title={shown}>
-            {shown || '—'}
-          </p>
+      <div className="space-y-3">
+        <div className="flex items-center gap-3 flex-wrap min-w-0">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs text-gray-500">
+              {kind} on {currentChain.name}
+              {kind === 'Calldata' && shown && ` · ${hexByteCount(shown)} bytes`}
+              {offlineMode && ' · offline'}
+            </p>
+            <p className="font-mono text-sm text-gray-300 truncate" title={shown}>
+              {shown || '—'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onExpand}
+            className="shrink-0 px-3 py-1.5 rounded-lg border border-gray-700 text-gray-300 text-sm hover:border-gray-500 hover:text-gray-50 transition-colors"
+          >
+            Edit input
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onExpand}
-          className="shrink-0 px-3 py-1.5 rounded-lg border border-gray-700 text-gray-300 text-sm hover:border-gray-500 hover:text-gray-50 transition-colors"
-        >
-          Edit input
-        </button>
+        {inputMode === 'rawtx' && rawTx && <SignedTxInfo tx={rawTx} chainId={chainId} />}
+        {inputMode === 'txhash' && txInfo && <TxInfoBar txInfo={txInfo} chain={currentChain} />}
       </div>
     );
   }
@@ -536,42 +693,29 @@ export function CalldataInput({
   return (
     <div className="space-y-4">
       <div className="flex gap-1 mb-1 items-center flex-wrap">
-        <button
-          type="button"
-          aria-pressed={inputMode === 'calldata'}
-          aria-label="Calldata input mode"
-          onClick={() => {
-            setInputMode('calldata');
-            const d = calldataDraftRef.current;
-            setCalldata(d);
-            schedulePersistCalldataDraft(d);
-            setError(null);
-          }}
-          className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-            inputMode === 'calldata'
-              ? 'bg-gray-700 text-gray-50'
-              : 'text-gray-500 hover:text-gray-300'
-          }`}
-        >
-          Calldata
-        </button>
-        <button
-          type="button"
-          aria-pressed={inputMode === 'txhash'}
-          aria-label="Transaction hash input mode"
-          onClick={() => {
-            calldataDraftRef.current = calldata;
-            setInputMode('txhash');
-            setError(null);
-          }}
-          className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-            inputMode === 'txhash'
-              ? 'bg-gray-700 text-gray-50'
-              : 'text-gray-500 hover:text-gray-300'
-          }`}
-        >
-          Transaction Hash
-        </button>
+        {MODES.map(m => (
+          <button
+            key={m.id}
+            type="button"
+            aria-pressed={inputMode === m.id}
+            aria-label={m.aria}
+            onClick={() => {
+              if (inputMode === 'calldata') calldataDraftRef.current = calldata;
+              if (m.id === 'calldata') {
+                const d = calldataDraftRef.current;
+                setCalldata(d);
+                schedulePersistCalldataDraft(d);
+              }
+              setInputMode(m.id);
+              setError(null);
+            }}
+            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              inputMode === m.id ? 'bg-gray-700 text-gray-50' : 'text-gray-500 hover:text-gray-300'
+            }`}
+          >
+            {m.label}
+          </button>
+        ))}
 
         <div className="flex-1" />
 
@@ -629,6 +773,24 @@ export function CalldataInput({
             <kbd className="px-1 py-0.5 rounded bg-gray-800 border border-gray-700 font-mono text-[10px]">Enter</kbd>
             {' '}for a new line
           </p>
+          {calldataHint && (
+            <p className="mt-1 text-xs text-amber-300" role="status">
+              {calldataHint.text}{' '}
+              <button
+                type="button"
+                className="underline underline-offset-2 hover:text-amber-200"
+                onClick={() => {
+                  calldataDraftRef.current = calldata;
+                  if (calldataHint.mode === 'typed') setTypedText(calldata);
+                  else setRawTxText(calldata.trim());
+                  setInputMode(calldataHint.mode);
+                  setError(null);
+                }}
+              >
+                Read it as {calldataHint.mode === 'typed' ? 'typed data' : 'a transaction'}
+              </button>
+            </p>
+          )}
           <div className="mt-3">
             <label htmlFor="optional-to-input" className="block text-sm font-medium text-gray-300 mb-1.5">
               Contract address <span className="text-gray-500 font-normal">(optional)</span>
@@ -669,7 +831,7 @@ export function CalldataInput({
             </p>
           </div>
         </div>
-      ) : (
+      ) : inputMode === 'txhash' ? (
         <div>
           <label htmlFor="txhash-input" className="block text-sm font-medium text-gray-300 mb-1.5">
             Transaction Hash
@@ -691,6 +853,64 @@ export function CalldataInput({
             {' '}to fetch and decode.
           </p>
         </div>
+      ) : inputMode === 'rawtx' ? (
+        <div>
+          <label htmlFor="rawtx-input" className="block text-sm font-medium text-gray-300 mb-1.5">
+            Serialized transaction (hex)
+          </label>
+          <textarea
+            id="rawtx-input"
+            value={rawTxText}
+            onChange={e => {
+              setRawTxText(e.target.value);
+              setRawTx(null);
+              setError(null);
+            }}
+            onKeyDown={handlePrimaryEnter}
+            placeholder="0x02f8…"
+            className="w-full h-32 rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-sm font-mono text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none resize-y"
+            spellCheck={false}
+            autoComplete="off"
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            A signed or unsigned transaction, as <code className="font-mono">cast mktx</code>, a wallet export, or a
+            signing request gives it. Nothing is broadcast: it is only read, and its sender recovered from the signature.
+          </p>
+        </div>
+      ) : inputMode === 'typed' ? (
+        <div>
+          <label htmlFor="typed-input" className="block text-sm font-medium text-gray-300 mb-1.5">
+            Typed data (EIP-712 JSON)
+          </label>
+          <textarea
+            id="typed-input"
+            value={typedText}
+            onChange={e => {
+              setTypedText(e.target.value);
+              setError(null);
+            }}
+            placeholder='{"types": {…}, "primaryType": "Permit", "domain": {…}, "message": {…}}'
+            className="w-full h-48 rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-sm font-mono text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none resize-y"
+            spellCheck={false}
+            autoComplete="off"
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            What a wallet asks you to sign with <code className="font-mono">eth_signTypedData_v4</code>: the JSON itself
+            or the whole request. Permits, Permit2, Seaport orders, and Safe transactions get a plain-language reading.
+          </p>
+        </div>
+      ) : (
+        <SafeTxForm
+          value={safeForm}
+          onChange={next => {
+            setSafeForm(next);
+            setError(null);
+          }}
+          chainId={chainId}
+          nativeCurrency={currentChain.nativeCurrency}
+          offlineMode={offlineMode}
+          onEnter={handlePrimaryEnter}
+        />
       )}
 
       {error && (
@@ -703,15 +923,28 @@ export function CalldataInput({
         <OptionalToContextBar addressInput={optionalContractTo} chain={currentChain} />
       )}
 
-      {txInfo && (
+      {inputMode === 'txhash' && txInfo && (
         <TxInfoBar txInfo={txInfo} chain={currentChain} />
       )}
+
+      {inputMode === 'rawtx' && rawTx && <SignedTxInfo tx={rawTx} chainId={chainId} />}
 
       <div className="flex items-center gap-4 flex-wrap">
         <button
           type="button"
           onClick={handleDecode}
-          disabled={currentlyLoading || (inputMode === 'calldata' ? !calldata.trim() : !txHash.trim())}
+          disabled={
+            currentlyLoading ||
+            (inputMode === 'calldata'
+              ? !calldata.trim()
+              : inputMode === 'txhash'
+                ? !txHash.trim()
+                : inputMode === 'rawtx'
+                  ? !rawTxText.trim()
+                  : inputMode === 'typed'
+                    ? !typedText.trim()
+                    : !safeForm.safeAddress.trim() || !safeForm.tx.to.trim() || !safeForm.tx.nonce.trim())
+          }
           className="px-5 py-2 rounded-lg bg-blue-600 text-gray-50 text-sm font-medium hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           {currentlyLoading ? (
@@ -723,17 +956,19 @@ export function CalldataInput({
               {isFetchingTx ? 'Fetching tx...' : 'Decoding...'}
             </span>
           ) : (
-            inputMode === 'txhash' ? 'Fetch & Decode' : 'Decode'
+            inputMode === 'txhash' ? 'Fetch & Decode' : inputMode === 'safe' ? 'Check hashes & decode' : 'Decode'
           )}
         </button>
 
-        <button
-          type="button"
-          onClick={() => setShowAbi(!showAbi)}
-          className="px-3 py-2 rounded-lg border border-gray-700 text-gray-400 text-sm hover:border-gray-500 hover:text-gray-300 transition-colors"
-        >
-          {showAbi ? 'Hide' : 'Provide'} ABI
-        </button>
+        {inputMode !== 'typed' && (
+          <button
+            type="button"
+            onClick={() => setShowAbi(!showAbi)}
+            className="px-3 py-2 rounded-lg border border-gray-700 text-gray-400 text-sm hover:border-gray-500 hover:text-gray-300 transition-colors"
+          >
+            {showAbi ? 'Hide' : 'Provide'} ABI
+          </button>
+        )}
 
         <label className="flex items-center gap-2 cursor-pointer">
           <input
@@ -762,7 +997,7 @@ export function CalldataInput({
         )}
       </div>
 
-      {showAbi && (
+      {showAbi && inputMode !== 'typed' && (
         <div>
           <label htmlFor="abi-input" className="block text-sm font-medium text-gray-300 mb-1.5">
             Contract ABI (JSON)

@@ -229,6 +229,7 @@ function effectiveTupleArrayCap(hints: CalldataIndex[]): number {
 function sourcePrecedence(source: FunctionSignature['source']): number {
   switch (source) {
     case 'user-abi':
+    case 'typed-data':
       return 0;
     case 'bundled':
       return 1;
@@ -1493,6 +1494,33 @@ async function resolveTokenInfo(
     cache.set(key, pending);
   }
   return pending;
+}
+
+/**
+ * Put an amount in `token`'s units when the token is known from outside the call (an EIP-712 domain's contract, a
+ * struct field next to the amount). Registry first, then the token contract, as for calldata.
+ */
+export async function annotateTokenAmount(
+  value: DecodedValue,
+  paramType: string,
+  token: string,
+  options: DecodeOptions,
+): Promise<void> {
+  if (value.kind !== 'primitive') return;
+  let info: TokenInfo | undefined;
+  try {
+    info = await resolveTokenInfo(token, options);
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') throw e;
+    return;
+  }
+  if (!info) return;
+  if (value.raw === UINT160_MAX.toString() && paramType === 'uint160') {
+    value.interpretation = `Unlimited ${info.unverified ? `"${info.symbol}"` : info.symbol} (type(uint160).max)`;
+    value.tokenAmount = { symbol: info.symbol, decimals: info.decimals, ...(info.unverified ? { unverified: true } : {}) };
+    return;
+  }
+  applyTokenContextToUintPrimitive(paramType, value, info, true);
 }
 
 /**

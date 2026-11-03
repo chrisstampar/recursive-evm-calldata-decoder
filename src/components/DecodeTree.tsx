@@ -93,6 +93,11 @@ interface DecodeTreeProps {
    * Pass e.g. `${origin}${pathname}${search}` if the hash must not be shared.
    */
   shareUrl?: string;
+  /**
+   * The calldata was built from a signature request or a Safe form, not sent by anyone: no share link or calldata
+   * copy, and the heading says what it is.
+   */
+  synthetic?: 'signature' | 'safe';
 }
 
 function serializeResult(result: DecodeResult): string {
@@ -124,7 +129,7 @@ function joinPartialDecodeErrors(errors: readonly unknown[]): string {
     .join(', ');
 }
 
-export function DecodeTree({ result, autoExpandMaxDepth, shareUrl }: DecodeTreeProps) {
+export function DecodeTree({ result, autoExpandMaxDepth, shareUrl, synthetic }: DecodeTreeProps) {
   const chainId = useChainId();
   const chain = useMemo(() => getChain(chainId), [chainId]);
 
@@ -314,21 +319,31 @@ export function DecodeTree({ result, autoExpandMaxDepth, shareUrl }: DecodeTreeP
     <div className="space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
         <h3 className="text-sm font-medium text-gray-400">
-          {isError ? 'Decode failed' : isNativeTransfer ? 'Transaction (no calldata)' : 'Decoded Transaction'}
+          {isError
+            ? 'Decode failed'
+            : isNativeTransfer
+              ? 'Transaction (no calldata)'
+              : synthetic === 'signature'
+                ? 'Decoded message'
+                : synthetic === 'safe'
+                  ? 'Decoded Safe transaction'
+                  : 'Decoded Transaction'}
         </h3>
         <div className="flex-1" />
-        <button
-          type="button"
-          onClick={handleShareUrl}
-          className="text-xs text-gray-500 hover:text-gray-400 transition-colors flex items-center gap-1"
-          title={shareUrlTitle}
-          disabled={!resolvedShareUrl}
-        >
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-          </svg>
-          {urlCopyFailed ? 'Copy failed' : urlCopied ? 'Link Copied!' : 'Share'}
-        </button>
+        {!synthetic && (
+          <button
+            type="button"
+            onClick={handleShareUrl}
+            className="text-xs text-gray-500 hover:text-gray-400 transition-colors flex items-center gap-1"
+            title={shareUrlTitle}
+            disabled={!resolvedShareUrl}
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+            </svg>
+            {urlCopyFailed ? 'Copy failed' : urlCopied ? 'Link Copied!' : 'Share'}
+          </button>
+        )}
         <button
           type="button"
           onClick={handleCopyJson}
@@ -340,7 +355,7 @@ export function DecodeTree({ result, autoExpandMaxDepth, shareUrl }: DecodeTreeP
           </svg>
           {jsonCopyFailed ? 'Copy failed' : copied ? 'Copied!' : 'Copy JSON'}
         </button>
-        {canCopyCalldata && (
+        {canCopyCalldata && !synthetic && (
           <button
             type="button"
             onClick={handleCopyCalldata}
