@@ -54,15 +54,23 @@ function SeverityIcon({ severity }: { severity: WarningSeverity }) {
   );
 }
 
+/** Severity in words, so it doesn't rest on colour alone (screen readers, colour-blind users). */
+const SEVERITY_LABEL: Record<WarningSeverity, string> = { danger: 'Danger', warning: 'Warning', info: 'Info' };
+
 function WarningCard({ warning }: { warning: TxWarning }) {
   const styles = SEVERITY_STYLES[warning.severity];
 
   return (
-    <div className={`rounded-lg border ${styles.border} ${styles.bg} px-4 py-3`}>
+    <div role="listitem" className={`rounded-lg border ${styles.border} ${styles.bg} px-4 py-3`}>
       <div className={`flex items-start gap-3 ${styles.icon}`}>
         <SeverityIcon severity={warning.severity} />
         <div className="min-w-0 flex-1">
-          <h4 className={`text-sm font-semibold break-words ${styles.title}`}>{warning.title}</h4>
+          <h4 className={`text-sm font-semibold break-words ${styles.title}`}>
+            <span className="mr-2 align-middle text-[10px] font-bold uppercase tracking-wide opacity-90">
+              {SEVERITY_LABEL[warning.severity]}
+            </span>
+            {warning.title}
+          </h4>
           {warning.context && (
             <p
               className={`text-[11px] leading-snug mt-1 font-mono break-all hyphens-none ${styles.context}`}
@@ -86,11 +94,20 @@ export function WarningBanner({ warnings }: { warnings: TxWarning[] }) {
     return order[a.severity] - order[b.severity];
   });
 
+  const counts = (['danger', 'warning', 'info'] as const)
+    .map(sev => [sev, sorted.filter(w => w.severity === sev).length] as const)
+    .filter(([, n]) => n > 0)
+    .map(([sev, n]) => `${SEVERITY_LABEL[sev]} ${n}`)
+    .join(' · ');
+
   return (
-    <div className="space-y-2">
-      {sorted.map((w, i) => (
-        <WarningCard key={i} warning={w} />
-      ))}
+    <div className="space-y-2" aria-live="polite">
+      <h2 className="text-xs font-medium text-gray-400">Warnings: {counts}</h2>
+      <div className="space-y-2" role="list">
+        {sorted.map((w, i) => (
+          <WarningCard key={i} warning={w} />
+        ))}
+      </div>
     </div>
   );
 }

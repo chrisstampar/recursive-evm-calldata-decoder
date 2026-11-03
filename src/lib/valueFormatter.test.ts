@@ -285,3 +285,21 @@ describe('coerceAbiDecodedBool', () => {
     expect(coerceAbiDecodedBool('1')).toBe(true);
   });
 });
+
+describe('looksLikeAddressNotNumber', () => {
+  it('rejects ABI offsets, lengths and small amounts that happen to be left-padded', async () => {
+    const { looksLikeAddressNotNumber, scanHexForWordAlignedPaddedAddresses } = await import('./valueFormatter.ts');
+    expect(looksLikeAddressNotNumber('0x0000000000000000000000000000000000000040')).toBe(false);
+    expect(looksLikeAddressNotNumber('0x0000000000000000000000056bc75e2d63100000')).toBe(false); // 100 ETH in wei
+    const word = (h: string) => h.replace(/^0x/, '').padStart(64, '0');
+    const blob = '0x' + word('40') + word('80') + word('03');
+    expect(scanHexForWordAlignedPaddedAddresses(blob, 1)).toEqual([]);
+  });
+
+  it('keeps real addresses, including vanity ones with leading zero bytes', async () => {
+    const { looksLikeAddressNotNumber } = await import('./valueFormatter.ts');
+    expect(looksLikeAddressNotNumber('0x0000000000000068F116a894984e2DB1123eB395')).toBe(true); // Seaport 1.6
+    expect(looksLikeAddressNotNumber('0x000000000004444c5dc75cB358380D2e3dE08A90')).toBe(true); // v4 PoolManager
+    expect(looksLikeAddressNotNumber('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48')).toBe(true);
+  });
+});

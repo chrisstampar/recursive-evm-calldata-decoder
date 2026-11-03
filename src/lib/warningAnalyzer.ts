@@ -15,6 +15,7 @@ import {
   type PatternRiskLevel,
 } from './knownPatterns.ts';
 import { extractLeftPaddedAddressFromBytes32 } from './valueFormatter.ts';
+import { classifyTrailingData } from './trailingData.ts';
 
 function checksumTxTo(addr: string): string {
   try {
@@ -133,7 +134,39 @@ export function analyzeWarnings(
   const seenAmbiguousDecodes = new Set<string>();
   walkCall(call, warnings, chainId, seenPatternSelectors, seenAmbiguousDecodes);
 
+  // Router plans often enforce the minimum in a later step instead of the swap itself.
+  if (hasLaterSlippageGuard(call)) {
+    return warnings.filter(w => w.title !== 'No slippage limit');
+  }
   return warnings;
+}
+
+/** Router steps that enforce a minimum received amount outside the swap step. */
+const SLIPPAGE_GUARD_STEPS = /^(BALANCE_CHECK_ERC20|TAKE_ALL|TAKE|SWEEP|UNWRAP_WETH|UNWRAP|WRAP_ETH)\b/;
+const GUARD_MIN_PARAM = /^(minAmount|amountMin|minBalance)$/;
+
+function hasLaterSlippageGuard(call: DecodedCall): boolean {
+  let found = false;
+  const visitCall = (c: DecodedCall): void => {
+    if (found) return;
+    if (SLIPPAGE_GUARD_STEPS.test(c.signature.name)) {
+      for (const p of c.params) {
+        if (GUARD_MIN_PARAM.test(p.name) && p.value.kind === 'primitive' && p.value.raw !== '0') {
+          found = true;
+          return;
+        }
+      }
+    }
+    c.params.forEach(p => visitValue(p.value));
+  };
+  const visitValue = (v: DecodedValue): void => {
+    if (found) return;
+    if (v.kind === 'bytes' && v.decoded) visitCall(v.decoded);
+    else if (v.kind === 'array') v.elements.forEach(visitValue);
+    else if (v.kind === 'tuple') v.fields.forEach(f => visitValue(f.value));
+  };
+  visitCall(call);
+  return found;
 }
 
 function patternRiskToSeverity(level: PatternRiskLevel): WarningSeverity {
@@ -320,12 +353,15 @@ function checkCallForWarnings(
 
   // Offset scans inside packed payloads always run to the end of the buffer, so a tail there is expected.
   if (call.unparsedTrailingHex && !call.speculative) {
-    const n = (call.unparsedTrailingHex.length - 2) / 2;
+    const tail = classifyTrailingData(call.unparsedTrailingHex);
+    const known = tail.kind !== 'unknown';
     warnings.push({
-      severity: 'warning',
-      title: 'Unparsed trailing calldata',
-      context: `${frame} Why: ${n} byte(s) follow the ABI-encoded arguments of \`${fnName}\`.`,
-      message: `These bytes are not shown as parameters, but the contract can still read them from msg.data.${n === 20 ? ' 20 bytes is the ERC-2771 pattern (a forwarder appending the original sender) — check the trusted forwarder.' : ' Legitimate contracts rarely need this; a malicious one can hide instructions there.'}`,
+      severity: known ? 'info' : 'warning',
+      title: known ? 'Trailing data tag' : 'Unparsed trailing calldata',
+      context: `${frame} Why: ${tail.byteLength} byte(s) follow the ABI-encoded arguments of \`${fnName}\`.`,
+      message: known
+        ? `${tail.label}. Contracts normally ignore these bytes; they are shown below the parameters.`
+        : 'These bytes are not shown as parameters, but the contract can still read them from msg.data. Frontends append short tags here routinely; a long unexplained tail is unusual, and a malicious contract can hide instructions there.',
     });
   }
   if (call.nonCanonicalEncoding && !call.speculative) {
@@ -364,6 +400,8 @@ function checkCallForWarnings(
       });
     }
   }
+
+  checkZeroSlippageLimit(call, warnings, frame);
 
   const transferAmount = findTransferAmountParam(call);
   if (transferAmount) {
@@ -444,8 +482,10 @@ function checkApprovals(call: DecodedCall, warnings: TxWarning[], chainId: numbe
     return;
   }
 
-  if (sel === PERMIT2_PERMIT_SINGLE_SELECTOR || sel === PERMIT2_PERMIT_BATCH_SELECTOR) {
-    const permit = call.params[1]?.value;
+  // Permit2 `permit(owner, PermitSingle|PermitBatch, sig)`, or the same struct as a Universal Router
+  // PERMIT2_PERMIT / PERMIT2_PERMIT_BATCH command.
+  if (sel === PERMIT2_PERMIT_SINGLE_SELECTOR || sel === PERMIT2_PERMIT_BATCH_SELECTOR || /^PERMIT2_PERMIT(_BATCH)?\b/.test(fnName)) {
+    const permit = call.params.find(p => p.name === 'permitSingle' || p.name === 'permitBatch')?.value;
     if (permit?.kind !== 'tuple') return;
     const [detailsField, spenderField] = permit.fields;
     const details =
@@ -486,6 +526,32 @@ function checkApprovals(call: DecodedCall, warnings: TxWarning[], chainId: numbe
     return;
   }
   checkLargeTokenAmount(amountParam, call, warnings, 'approval');
+}
+
+/** Minimum-output fields of swaps (top-level args or struct fields). */
+const MIN_OUTPUT_PARAM_NAME = /^_?(amountOutMin(imum)?|minAmountOut|minReturnAmount|min_dy|minOut(put)?|minBuyAmount)$/i;
+
+/**
+ * A swap whose minimum output is 0 accepts any price: the classic sandwich-attack setup. Reported once per
+ * transaction (multi-hop and router plans repeat the field).
+ */
+function checkZeroSlippageLimit(call: DecodedCall, warnings: TxWarning[], frame: string): void {
+  if (warnings.some(w => w.title === 'No slippage limit')) return;
+  let hit: string | undefined;
+  const visit = (name: string, v: DecodedValue): void => {
+    if (hit) return;
+    if (v.kind === 'primitive' && MIN_OUTPUT_PARAM_NAME.test(name) && v.raw === '0') hit = name;
+    else if (v.kind === 'tuple') v.fields.forEach(f => visit(f.name, f.value));
+  };
+  call.params.forEach(p => visit(p.name, p.value));
+  if (!hit) return;
+  warnings.push({
+    severity: 'warning',
+    title: 'No slippage limit',
+    context: `${frame} Why: \`${hit}\` is 0.`,
+    message:
+      'The swap accepts any output amount, so a front-running bot can sandwich it and take most of the value. Wallets and frontends normally set a minimum; bots sometimes rely on private order flow instead.',
+  });
 }
 
 /** Safe batching libraries that are normal DELEGATECALL targets (MultiSend / MultiSendCallOnly 1.3.0 and 1.4.1). */

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { CHAINS } from './chains.ts';
 import {
   clearTxCalldataCache,
   clearTxFetcherEndpointCircuits,
@@ -9,6 +10,9 @@ import {
   TxIndexingLagError,
   TxNotFoundError,
 } from './txFetcher.ts';
+
+/** Tests below make the first configured mainnet RPC misbehave and expect a fallback to the next one. */
+const FIRST_MAINNET_RPC = CHAINS[1].rpcs[0];
 
 const TX =
   '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as const;
@@ -53,7 +57,7 @@ describe('fetchTxCalldata', () => {
         if (method === 'eth_getTransactionReceipt') {
           return jsonResponse({ jsonrpc: '2.0', id: 2, result: null });
         }
-        if (u.includes('llamarpc') && method === 'eth_getTransactionByHash') {
+        if (u.startsWith(FIRST_MAINNET_RPC) && method === 'eth_getTransactionByHash') {
           return jsonResponse({ jsonrpc: '2.0', id: 1, result: null });
         }
         return jsonResponse({ jsonrpc: '2.0', id: 1, result: validTx });
@@ -70,7 +74,7 @@ describe('fetchTxCalldata', () => {
       vi.fn(async (url: string | URL, init?: RequestInit) => {
         const u = String(url);
         const { method } = parseRpcBody(init);
-        if (u.includes('llamarpc')) {
+        if (u.startsWith(FIRST_MAINNET_RPC)) {
           if (method === 'eth_getTransactionByHash') {
             return jsonResponse({ jsonrpc: '2.0', id: 1, result: null });
           }
@@ -153,7 +157,7 @@ describe('fetchTxCalldata', () => {
       'fetch',
       vi.fn(async (url: string | URL) => {
         const u = String(url);
-        if (u.includes('llamarpc')) {
+        if (u.startsWith(FIRST_MAINNET_RPC)) {
           return new Response('<!doctype html><title>error</title>', {
             status: 200,
             headers: { 'Content-Type': 'text/html' },
@@ -173,7 +177,7 @@ describe('fetchTxCalldata', () => {
       vi.fn(async (url: string | URL, init?: RequestInit) => {
         const u = String(url);
         const { method } = parseRpcBody(init);
-        if (u.includes('llamarpc') && method === 'eth_getTransactionByHash') {
+        if (u.startsWith(FIRST_MAINNET_RPC) && method === 'eth_getTransactionByHash') {
           return jsonResponse({ jsonrpc: '2.0', id: 1, result: '0x1234' });
         }
         return jsonResponse({ jsonrpc: '2.0', id: 1, result: validTx });

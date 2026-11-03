@@ -157,7 +157,7 @@ const PATTERNS: MulticallPattern[] = [
     calldataIndices: [{ kind: 'array-direct', paramIndex: 1 }],
     riskLevel: 'medium',
     description:
-      'Universal Router command stream: `bytes[]` inputs drive nested swaps and calls. Treat as arbitrary execution relative to the router.',
+      'Universal Router command plan: each command (swap, permit, transfer, sweep…) is decoded below. Check every recipient, amount and PERMIT2 permit; the router acts with whatever allowances you have given it.',
   },
   // execute(bytes,bytes[])
   {
@@ -166,7 +166,7 @@ const PATTERNS: MulticallPattern[] = [
     calldataIndices: [{ kind: 'array-direct', paramIndex: 1 }],
     riskLevel: 'medium',
     description:
-      'Universal Router command stream: `bytes[]` inputs drive nested swaps and calls. Treat as arbitrary execution relative to the router.',
+      'Universal Router command plan: each command (swap, permit, transfer, sweep…) is decoded below. Check every recipient, amount and PERMIT2 permit; the router acts with whatever allowances you have given it.',
   },
   // swapCompact — selector is `swapCompact()` on 4byte; real txs often append a non-ABI packed blob (decoder path in `decoder.ts`).
   {

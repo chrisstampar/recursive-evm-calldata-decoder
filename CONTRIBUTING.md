@@ -37,7 +37,22 @@ If you change **`public/favicon.svg`**, regenerate PNGs with **`npm run gen:icon
 npm run test:integration
 ```
 
-These hit public networks and may be slower or flaky on poor connectivity; they are **not** required for every doc-only change.
+These hit public networks and may be slower or flaky on poor connectivity; they are **not** required for every doc-only change. They cover:
+
+- a real Enso transaction end to end,
+- every RPC in `src/lib/chains.ts` (answers for the right chain, sends a CORS header browsers accept),
+- the curated registry against each chain (token symbol / decimals, labelled contracts have code; deliberate
+  differences are listed in `SYMBOL_EXCEPTIONS`).
+
+Run them after editing `chains.ts` or `abiRegistry.ts`.
+
+## Fuzz tests
+
+`src/lib/decoder.fuzz.test.ts` runs in the normal suite with a small run count. For a deep pass:
+
+```bash
+FUZZ_RUNS=20000 npx vitest run --config config/vitest.config.ts src/lib/decoder.fuzz.test.ts
+```
 
 ## Style
 

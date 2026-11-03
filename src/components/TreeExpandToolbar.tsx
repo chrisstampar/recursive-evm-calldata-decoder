@@ -38,7 +38,7 @@ export function TreeExpandToolbar() {
   }, [expandAll, collapseAll]);
 
   const btn =
-    'text-xs text-gray-600 hover:text-white transition-colors px-1.5 py-0.5 rounded border border-transparent hover:border-gray-500';
+    'text-xs text-gray-500 hover:text-white transition-colors px-1.5 py-0.5 rounded border border-transparent hover:border-gray-500';
 
   return (
     <div className="flex items-center gap-1.5 shrink-0" role="group" aria-label="Decode tree expansion">
@@ -51,7 +51,7 @@ export function TreeExpandToolbar() {
       >
         Expand all
       </button>
-      <span className="text-gray-700 select-none" aria-hidden>
+      <span className="text-gray-500 select-none" aria-hidden>
         |
       </span>
       <button

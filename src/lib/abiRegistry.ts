@@ -274,10 +274,9 @@ const KNOWN_CONTRACTS_RAW: Record<number, Record<string, ContractRegistryEntry>>
   '0x79a50f83e7aff970ceab5152a15461a4f1c3799e': { name: 'Convex Prisma Booster' },
   '0x34635280737b5bfe6c7dc2fc3065d60d66e78185': { name: 'cvxPrisma' },
 
-  // Superform v2 — Ethereum mainnet (deterministic across chains)
-  '0x1101eec94dd79bee1b5a77b96c15ac24a4691e2e': { name: 'Superform SuperBundler' },
+  // Superform v2 — Ethereum mainnet (deterministic across chains). SuperBundler 0x1101…1e2e and SuperValidator
+  // 0xb46b…2c4c were dropped 2026-11-02: no code at those addresses on mainnet, so a label would vouch for nothing.
   '0x9cc8edcc41154aafc74d261ad3d87140d21f6281': { name: 'Superform SuperExecutor' },
-  '0xb46b4773c5f53ff941533f5dfeffd0a684392c4c': { name: 'Superform SuperValidator' },
   '0x04916bb42564cded96e10f55c059d65e4fcb1be6': { name: 'Superform SuperLedger' },
   '0xa3aa31f8d4da6005aafb0d61e5012a64d15f5b3a': { name: 'Superform Nexus' },
   '0x4153db38136e74a88a77b51a955a88823820c050': { name: 'Superform NexusAccountFactory' },
@@ -648,6 +647,8 @@ const KNOWN_TOKENS_RAW: Record<number, Record<string, TokenInfo>> = {
   '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': { symbol: 'USDC', decimals: 6 },
   '0xdac17f958d2ee523a2206206994597c13d831ec7': { symbol: 'USDT', decimals: 6 },
   /** Tether USDT0 (LayerZero OFT on Ethereum). */
+  // USDT0 OFT *adapter* (not an ERC-20: decimals()/symbol() revert). Listed so LayerZero `send` amounts called on
+  // it get units; it locks mainnet USDT, which is 6 decimals.
   '0x6c96de32cea08842dcc4058c14d3aaad7fa41dee': { symbol: 'USDT0', decimals: 6 },
   '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599': { symbol: 'WBTC', decimals: 8 },
   '0x7d1afa7b718fb893db30a3abc0cfc608aacfebb0': { symbol: 'MATIC', decimals: 18 },
@@ -659,7 +660,8 @@ const KNOWN_TOKENS_RAW: Record<number, Record<string, TokenInfo>> = {
 
   // f(x) Protocol
   '0x085780639cc2cacd35e474e71f4d000e2405d8f6': { symbol: 'fxUSD', decimals: 18 },
-  '0x65c9a641afceb9c0e6034e558a319488fa0fa3be': { symbol: 'fxBASE', decimals: 18 },
+  // f(x) stability pool share ("fxBASE" / fxUSD Save in the f(x) UI); symbol() on chain is fxSP.
+  '0x65c9a641afceb9c0e6034e558a319488fa0fa3be': { symbol: 'fxSP', decimals: 18 },
   '0x365accfca291e7d3914637abf1f7635db165bb09': { symbol: 'FXN', decimals: 18 },
 
   // Pendle / Equilibria
@@ -722,8 +724,8 @@ const KNOWN_TOKENS_RAW: Record<number, Record<string, TokenInfo>> = {
   // Prisma
   '0xda47862a83dac0c112ba89c6abc2159b95afd71c': { symbol: 'PRISMA', decimals: 18 },
 
-  // Fluid INST token
-  '0x6f40d4a6237c257fff2db00fa0510deeecd303eb': { symbol: 'INST', decimals: 18 },
+  // Fluid governance token (formerly Instadapp INST; the contract's symbol() is now FLUID)
+  '0x6f40d4a6237c257fff2db00fa0510deeecd303eb': { symbol: 'FLUID', decimals: 18 },
 
   // Superform
   '0x1d926bbe67425c9f507b9a0e8030eedc7880bf33': { symbol: 'UP', decimals: 18 },
@@ -735,7 +737,8 @@ const KNOWN_TOKENS_RAW: Record<number, Record<string, TokenInfo>> = {
     '0xda10009cbd5d07dd0cecc66161fc93d7c9000da1': { symbol: 'DAI', decimals: 18 },
     '0xff970a61a04b1ca14834a43f5de4533ebddb5cc8': { symbol: 'USDC.e', decimals: 6 },
     '0xaf88d065e77c8cc2239327c5edb3a432268e5831': { symbol: 'USDC', decimals: 6 },
-    '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9': { symbol: 'USDT', decimals: 6 },
+    // Arbitrum's canonical USDT migrated to USDT0 (symbol() = "USD₮0"; ASCII here).
+    '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9': { symbol: 'USDT0', decimals: 6 },
     '0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f': { symbol: 'WBTC', decimals: 8 },
     '0xf97f4df75117a78c1a5a0dbb814af92458539fb4': { symbol: 'LINK', decimals: 18 },
     '0xba5ddd1f9d7f570dc94a51479a000e3bce967196': { symbol: 'AAVE', decimals: 18 },
@@ -790,7 +793,8 @@ const KNOWN_TOKENS_RAW: Record<number, Record<string, TokenInfo>> = {
     '0x8f3cf7ad23cd3cadbd9735aff958023239c6a063': { symbol: 'DAI', decimals: 18 },
     '0x2791bca1f2de4661ed88a30c99a7a9449aa84174': { symbol: 'USDC.e', decimals: 6 },
     '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359': { symbol: 'USDC', decimals: 6 },
-    '0xc2132d05d31c914a87c6611c10748aeb04b58e8f': { symbol: 'USDT', decimals: 6 },
+    // Polygon's canonical USDT migrated to USDT0 (symbol() = "USDT0").
+    '0xc2132d05d31c914a87c6611c10748aeb04b58e8f': { symbol: 'USDT0', decimals: 6 },
     '0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6': { symbol: 'WBTC', decimals: 8 },
     '0x53e0bca35ec356bd5dddfebbd1fc0fd03fabad39': { symbol: 'LINK', decimals: 18 },
     '0xd6df932a45c0f255f85145f286ea0b292b21c90b': { symbol: 'AAVE', decimals: 18 },
@@ -915,8 +919,10 @@ const BUNDLED_SIGNATURES: FunctionSignature[] = [
   { selector: '0x3593564c', name: 'execute', textSignature: 'execute(bytes,bytes[],uint256)', params: [{ name: 'commands', type: 'bytes' }, { name: 'inputs', type: 'bytes[]' }, { name: 'deadline', type: 'uint256' }], source: 'bundled', popularity: 100 },
   { selector: '0x24856bc3', name: 'execute', textSignature: 'execute(bytes,bytes[])', params: [{ name: 'commands', type: 'bytes' }, { name: 'inputs', type: 'bytes[]' }], source: 'bundled', popularity: 70, deprecated: true },
 
-  // 1inch Aggregation Router V6
-  { selector: '0x12aa3caf', name: 'swap', textSignature: 'swap(address,(address,address,address,address,uint256,uint256,uint256),bytes,bytes)', params: [{ name: 'executor', type: 'address' }, { name: 'desc', type: '(address,address,address,address,uint256,uint256,uint256)' }, { name: 'data', type: 'bytes' }, { name: 'callbackData', type: 'bytes' }], source: 'bundled' },
+  // 1inch Aggregation Router V5 (0x1111111254EEB25477B68fb85Ed929f73A960582)
+  { selector: '0x12aa3caf', name: 'swap', textSignature: 'swap(address,(address,address,address,address,uint256,uint256,uint256),bytes,bytes)', params: [{ name: 'executor', type: 'address' }, { name: 'desc', type: '(address,address,address,address,uint256,uint256,uint256)', components: [{ name: 'srcToken', type: 'address' }, { name: 'dstToken', type: 'address' }, { name: 'srcReceiver', type: 'address' }, { name: 'dstReceiver', type: 'address' }, { name: 'amount', type: 'uint256' }, { name: 'minReturnAmount', type: 'uint256' }, { name: 'flags', type: 'uint256' }] }, { name: 'permit', type: 'bytes' }, { name: 'data', type: 'bytes' }], source: 'bundled' },
+  // 1inch Aggregation Router V6 (0x111111125421cA6dc452d289314280a0f8842A65) — same SwapDescription, no permit arg
+  { selector: '0x07ed2379', name: 'swap', textSignature: 'swap(address,(address,address,address,address,uint256,uint256,uint256),bytes)', params: [{ name: 'executor', type: 'address' }, { name: 'desc', type: '(address,address,address,address,uint256,uint256,uint256)', components: [{ name: 'srcToken', type: 'address' }, { name: 'dstToken', type: 'address' }, { name: 'srcReceiver', type: 'address' }, { name: 'dstReceiver', type: 'address' }, { name: 'amount', type: 'uint256' }, { name: 'minReturnAmount', type: 'uint256' }, { name: 'flags', type: 'uint256' }] }, { name: 'data', type: 'bytes' }], source: 'bundled' },
   // 1inch Aggregation Router (alternate `swap` — common inside Enso / aggregator `commands[]`; OpenChain verified)
   {
     selector: '0x90411a32',
@@ -947,16 +953,17 @@ const BUNDLED_SIGNATURES: FunctionSignature[] = [
     source: 'bundled',
     popularity: 5000,
   },
-  // Enso Router V2 — `routeData` from `routeMulti` is usually this shortcut runner (OpenChain verified)
+  // Enso shortcuts (weiroll VM) — `routeData` from `routeMulti` / `routeSingle` is usually this runner.
+  // `commands` are packed weiroll call words; `state` holds the values (and sometimes raw calldata) they use.
   {
     selector: '0x95352c9f',
     name: 'executeShortcut',
     textSignature: 'executeShortcut(bytes32,bytes32,bytes32[],bytes[])',
     params: [
-      { name: 'shortcutId', type: 'bytes32' },
-      { name: 'referrer', type: 'bytes32' },
-      { name: 'leaves', type: 'bytes32[]' },
-      { name: 'commands', type: 'bytes[]' },
+      { name: 'accountId', type: 'bytes32' },
+      { name: 'requestId', type: 'bytes32' },
+      { name: 'commands', type: 'bytes32[]' },
+      { name: 'state', type: 'bytes[]' },
     ],
     source: 'bundled',
     popularity: 5000,
@@ -1055,8 +1062,32 @@ const BUNDLED_SIGNATURES: FunctionSignature[] = [
     params: [
       { name: 'tokens', type: 'address[]' },
       { name: 'clearingPrices', type: 'uint256[]' },
-      { name: 'trades', type: '(uint256,uint256,address,uint256,uint256,uint32,bytes32,uint256,uint256,uint256,bytes)[]' },
-      { name: 'interactions', type: '(address,uint256,bytes)[][3]' },
+      {
+        name: 'trades',
+        type: '(uint256,uint256,address,uint256,uint256,uint32,bytes32,uint256,uint256,uint256,bytes)[]',
+        components: [
+          { name: 'sellTokenIndex', type: 'uint256' },
+          { name: 'buyTokenIndex', type: 'uint256' },
+          { name: 'receiver', type: 'address' },
+          { name: 'sellAmount', type: 'uint256' },
+          { name: 'buyAmount', type: 'uint256' },
+          { name: 'validTo', type: 'uint32' },
+          { name: 'appData', type: 'bytes32' },
+          { name: 'feeAmount', type: 'uint256' },
+          { name: 'flags', type: 'uint256' },
+          { name: 'executedAmount', type: 'uint256' },
+          { name: 'signature', type: 'bytes' },
+        ],
+      },
+      {
+        name: 'interactions',
+        type: '(address,uint256,bytes)[][3]',
+        components: [
+          { name: 'target', type: 'address' },
+          { name: 'value', type: 'uint256' },
+          { name: 'callData', type: 'bytes' },
+        ],
+      },
     ],
     source: 'bundled',
     popularity: 85,

@@ -7,6 +7,7 @@ import type {
   SignatureSource,
 } from '../types/index.ts';
 import { useChainId, useChainUi } from '../context/ChainContext.ts';
+import { classifyTrailingData } from '../lib/trailingData.ts';
 import { ExplorerAddressLink } from './ExplorerAddressLink.tsx';
 import { useTreeExpansionOptional } from '../context/TreeExpansionContext.tsx';
 import { getExplorerUrl } from '../lib/chains.ts';
@@ -274,8 +275,9 @@ function CopyButton({ text, copyTitle = 'Copy raw value' }: CopyButtonProps) {
     <button
       type="button"
       onClick={() => void handleCopy()}
-      className="ml-1.5 text-gray-600 hover:text-gray-400 transition-colors inline-flex shrink-0"
+      className="ml-1.5 text-gray-500 hover:text-gray-400 transition-colors inline-flex shrink-0"
       title={copyFailed ? 'Copy failed' : copyTitle}
+      aria-label={copyFailed ? 'Copy failed' : copied ? 'Copied' : copyTitle}
     >
       {copied ? (
         <svg className="w-3.5 h-3.5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -377,10 +379,13 @@ function CopyMenu({ raw, display, interpretation }: CopyMenuProps) {
             return !o;
           });
         }}
-        className="text-gray-600 hover:text-gray-400 transition-colors inline-flex"
+        className="text-gray-500 hover:text-gray-400 transition-colors inline-flex"
         title="Copy value — choose raw, formatted, or decoded text"
+        aria-label="Copy value"
+        aria-haspopup="menu"
+        aria-expanded={open}
       >
-        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
         </svg>
       </button>
@@ -645,7 +650,7 @@ function ValueDisplay({
                 key={`w${hit.wordIndex}-${hit.checksummed}-${i}`}
                 className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs"
               >
-                <span className="font-mono text-gray-600 shrink-0" title="Word index (32-byte slots from start of payload)">
+                <span className="font-mono text-gray-500 shrink-0" title="Word index (32-byte slots from start of payload)">
                   [{hit.wordIndex}]
                 </span>
                 <ExplorerAddressLink
@@ -662,9 +667,10 @@ function ValueDisplay({
       ) : null;
 
     if (value.decoded) {
+      // An exact decode already shows every address as a parameter; the raw-word scan only helps for guesses.
       return (
         <div className="min-w-0 mt-1 space-y-2">
-          {hitsBlock}
+          {value.decoded.speculative || value.decoded.unparsedTrailingHex ? hitsBlock : null}
           <DecodedCallNode call={value.decoded} autoExpandMaxDepth={autoExpandMaxDepth} />
         </div>
       );
@@ -677,7 +683,7 @@ function ValueDisplay({
     return (
       <div className="min-w-0">
         <span className="font-mono text-sm text-orange-300 break-all">{display}</span>
-        <span className="ml-2 text-xs text-gray-600">{byteLen} bytes</span>
+        <span className="ml-2 text-xs text-gray-500">{byteLen} bytes</span>
         <CopyButton text={value.hex} />
         {hitsBlock}
       </div>
@@ -697,6 +703,7 @@ function ValueDisplay({
         <div className="flex flex-col gap-0.5 min-w-0">
           <button
             type="button"
+            aria-expanded={expanded}
             onClick={() => setExpanded(!expanded)}
             className="text-xs text-gray-500 hover:text-gray-300 font-mono text-left w-fit"
           >
@@ -712,7 +719,7 @@ function ValueDisplay({
           <div className="mt-1 space-y-1 border-l-2 border-gray-800 pl-3">
             {value.elements.map((elem, i) => (
               <div key={arrayElementRowKey(value.elementType, elem, i, depth)}>
-                <span className="text-xs text-gray-600 font-mono">[{i}]</span>
+                <span className="text-xs text-gray-500 font-mono">[{i}]</span>
                 <div className="ml-2">
                   <ValueDisplay
                     value={elem}
@@ -736,6 +743,7 @@ function ValueDisplay({
       <div className="min-w-0">
         <button
           type="button"
+          aria-expanded={expanded}
           onClick={() => setExpanded(!expanded)}
           className="text-xs text-gray-500 hover:text-gray-300 font-mono"
         >
@@ -791,7 +799,7 @@ function ParamRow({
             <button
               type="button"
               onClick={() => setShowRaw(!showRaw)}
-              className="text-[10px] text-gray-600 hover:text-gray-400 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+              className="text-[10px] text-gray-500 hover:text-gray-400 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
               title="Show or hide the 32-byte ABI-encoded hex word for this argument"
             >
               {showRaw ? 'hide hex' : 'hex'}
@@ -814,7 +822,7 @@ function ParamRow({
         </div>
       )}
       {showRaw && param.rawHex && (
-        <div className="mt-0.5 ml-2 text-xs font-mono text-gray-600 break-all" title="32-byte ABI word (hex)">
+        <div className="mt-0.5 ml-2 text-xs font-mono text-gray-500 break-all" title="32-byte ABI word (hex)">
           {param.rawHex}
         </div>
       )}
@@ -839,16 +847,27 @@ export function DecodedCallNode({
   return (
     <div className={`rounded-lg border min-w-0 ${call.depth === 0 ? 'border-gray-700 bg-gray-900/50' : 'border-gray-800 bg-gray-900/30'}`}>
       <div
-        className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-gray-800/50 transition-colors flex-wrap min-w-0"
+        className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-gray-800/50 transition-colors flex-wrap min-w-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 rounded-t-lg"
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        aria-label={`${call.signature.name} call (${expanded ? 'collapse' : 'expand'})`}
         onClick={() => setExpanded(!expanded)}
+        onKeyDown={e => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setExpanded(!expanded);
+          }
+        }}
       >
-        <span className="text-xs text-gray-600 font-mono shrink-0">
+        <span className="text-xs text-gray-500 font-mono shrink-0">
           {expanded ? '▼' : '▶'}
         </span>
         <span className="font-mono text-sm font-semibold text-blue-300 break-all">
           {call.signature.name}
         </span>
-        <span className="text-xs text-gray-600 font-mono shrink-0 hidden sm:inline">
+        <span className="text-xs text-gray-500 font-mono shrink-0 hidden sm:inline">
           {call.selector}
         </span>
         <ConfidenceBadge confidence={call.confidence} />
@@ -899,7 +918,7 @@ export function DecodedCallNode({
 
       {expanded && (
         <div className="px-3 py-2 border-t border-gray-800/50 space-y-2 min-w-0">
-          <div className="text-xs font-mono text-gray-600 break-all">
+          <div className="text-xs font-mono text-gray-500 break-all">
             {call.signature.textSignature}
           </div>
           {call.params.map((param, i) => (
@@ -913,8 +932,7 @@ export function DecodedCallNode({
           {call.unparsedTrailingHex && (
             <div className="min-w-0 rounded border border-orange-900/50 bg-orange-950/20 px-2 py-1.5">
               <div className="text-xs text-orange-300">
-                Unparsed trailing bytes ({(call.unparsedTrailingHex.length - 2) / 2}) — not part of the ABI arguments, but
-                readable by the contract
+                Trailing bytes after the ABI arguments — {classifyTrailingData(call.unparsedTrailingHex).label}
               </div>
               <div className="mt-0.5 flex items-start gap-1 min-w-0">
                 <span className="text-xs font-mono text-gray-400 break-all">{call.unparsedTrailingHex}</span>

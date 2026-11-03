@@ -313,10 +313,22 @@ export function scanHexForWordAlignedPaddedAddresses(
     if (!addr) continue;
     if (addr.toLowerCase() === '0x0000000000000000000000000000000000000000') continue;
     const nm = getContractName(addr, chainId);
+    if (!nm && !looksLikeAddressNotNumber(addr)) continue;
     out.push({ wordIndex: w, checksummed: addr, label: nm || undefined });
   }
   WORD_ALIGNED_ADDRESS_SCAN_CACHE.set(cacheKey, out);
   return out;
+}
+
+/**
+ * A left-padded word is only plausibly an address if its 20-byte value is large: real addresses (even vanity ones
+ * such as Seaport 0x0000000000000068F1…, Permit2 0x000000000022D4…, v4 PoolManager 0x000000000004444c…) have a
+ * non-zero byte among their first 8. Smaller values are ABI offsets, lengths, indices and amounts — a
+ * real-transaction run showed the scan listing `0x…40`, `0x…80`, `0x…03` as "addresses".
+ */
+export function looksLikeAddressNotNumber(checksummed: string): boolean {
+  const body = checksummed.replace(/^0x/i, '');
+  return body.length === 40 && /[1-9a-f]/i.test(body.slice(0, 16));
 }
 
 /** Plain-text note for left-padded addresses when the tree UI does not add a structured address row. */

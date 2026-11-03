@@ -4,7 +4,14 @@
 /* Class-driven dark mode (Tailwind v3-style `darkMode: 'class'`). Enables `dark:*` when `<html class="dark">` (or any `.dark` ancestor). */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Theme extensions: add `@theme { ... }` below, `@import "./theme.css";`, or keep using `tailwind.config.ts` if you introduce one. */
+/*
+ * Secondary text colour. Tailwind's default gray-500 is ~4.1:1 on the gray-950 page (WCAG AA needs 4.5:1 for small
+ * text), and the app used gray-600/700 for hints, selectors and the footer (~1.9–2.6:1). All secondary text now uses
+ * this lighter gray-500: ~5.5:1 on gray-950, ~4.8:1 on gray-900 panels.
+ */
+@theme {
+  --color-gray-500: #7f8796;
+}
 @layer base {
   :root {
     /* App-wide custom properties when not expressed via `@theme` / `theme()`. */

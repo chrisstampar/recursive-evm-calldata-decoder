@@ -12,8 +12,8 @@ const TX_HASH =
   '0xe4c28236ec36ede0910c397a9b50633b5d2bf8fb648946527e849135d5137ccd';
 
 const MAINNET_RPCS = CHAINS[1]?.rpcs ?? [
-  'https://eth.llamarpc.com',
   'https://ethereum-rpc.publicnode.com',
+  'https://eth.drpc.org',
 ];
 
 async function sleep(ms: number): Promise<void> {
@@ -80,7 +80,7 @@ describe('Enso tx 0xe4c28236… command scan (live RPC)', () => {
     if (routeData?.value.kind !== 'bytes') return;
     expect(routeData.value.decoded?.signature.name).toBe('executeShortcut');
 
-    const commands = routeData.value.decoded?.params.find((p) => p.name === 'commands');
+    const commands = routeData.value.decoded?.params.find((p) => p.name === 'state');
     expect(commands?.value.kind).toBe('array');
     if (commands?.value.kind !== 'array') return;
 

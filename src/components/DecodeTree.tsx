@@ -74,7 +74,7 @@ function NativeTransferSummary({ row, chain }: { row: NativeTransferResult; chai
       <div className="pt-1.5 mt-1 border-t border-gray-700/50">
         <span className="text-gray-500">Calldata: </span>
         <span className="font-mono text-gray-500">0x</span>
-        <span className="text-gray-600 ml-2">(empty — no function call)</span>
+        <span className="text-gray-500 ml-2">(empty — no function call)</span>
       </div>
     </div>
   );
@@ -308,7 +308,7 @@ export function DecodeTree({ result, autoExpandMaxDepth, shareUrl }: DecodeTreeP
         <button
           type="button"
           onClick={handleShareUrl}
-          className="text-xs text-gray-600 hover:text-gray-400 transition-colors flex items-center gap-1"
+          className="text-xs text-gray-500 hover:text-gray-400 transition-colors flex items-center gap-1"
           title={shareUrlTitle}
           disabled={!resolvedShareUrl}
         >
@@ -320,7 +320,7 @@ export function DecodeTree({ result, autoExpandMaxDepth, shareUrl }: DecodeTreeP
         <button
           type="button"
           onClick={handleCopyJson}
-          className="text-xs text-gray-600 hover:text-gray-400 transition-colors flex items-center gap-1"
+          className="text-xs text-gray-500 hover:text-gray-400 transition-colors flex items-center gap-1"
           title={jsonCopyFailed ? 'Copy failed' : undefined}
         >
           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -332,7 +332,7 @@ export function DecodeTree({ result, autoExpandMaxDepth, shareUrl }: DecodeTreeP
           <button
             type="button"
             onClick={handleCopyCalldata}
-            className="text-xs text-gray-600 hover:text-gray-400 transition-colors flex items-center gap-1"
+            className="text-xs text-gray-500 hover:text-gray-400 transition-colors flex items-center gap-1"
             title={
               rawHexCopyFailed
                 ? 'Copy failed'
@@ -349,7 +349,7 @@ export function DecodeTree({ result, autoExpandMaxDepth, shareUrl }: DecodeTreeP
           <button
             type="button"
             onClick={() => setShowJson(!showJson)}
-            className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
+            className="text-xs text-gray-500 hover:text-gray-400 transition-colors"
             aria-pressed={showJson}
             aria-label={
               showJson
@@ -387,7 +387,7 @@ export function DecodeTree({ result, autoExpandMaxDepth, shareUrl }: DecodeTreeP
           )}
           <div className="mt-3">
             <p className="text-xs text-gray-500 mb-1">Raw calldata:</p>
-            <div className="text-xs font-mono text-gray-600 break-all bg-gray-900/50 rounded p-2 max-h-32 overflow-y-auto">
+            <div className="text-xs font-mono text-gray-500 break-all bg-gray-900/50 rounded p-2 max-h-32 overflow-y-auto">
               {result.rawHex}
             </div>
           </div>

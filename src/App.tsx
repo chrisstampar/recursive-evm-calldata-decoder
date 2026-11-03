@@ -338,7 +338,7 @@ export default function App() {
                   >
                     {previewSampleWarnings ? 'Hide sample warnings' : 'Preview sample warnings'}
                   </button>
-                  <span className="text-[11px] text-gray-600">Dev only — not in production build</span>
+                  <span className="text-[11px] text-gray-500">Dev only — not in production build</span>
                 </div>
               )}
             </section>
@@ -351,7 +351,7 @@ export default function App() {
                 aria-busy="true"
               >
                 <div className="flex items-center gap-3 text-gray-500">
-                  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                  <svg className="animate-spin motion-reduce:animate-none h-5 w-5" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
@@ -379,7 +379,7 @@ export default function App() {
                   <DecodeTree result={result} autoExpandMaxDepth={autoExpandMaxDepth} />
                 </ErrorBoundary>
                 {decodeTimeMs !== null && (
-                  <p className="mt-4 text-xs text-gray-700 text-right">
+                  <p className="mt-4 text-xs text-gray-500 text-right">
                     Decoded in {decodeTimeMs}ms
                   </p>
                 )}
@@ -390,8 +390,8 @@ export default function App() {
               <section className="rounded-xl border border-gray-800/50 bg-gray-900/20 p-6 sm:p-8">
                 <div className="text-center">
                   <div className="text-4xl mb-4 opacity-20">{ '{...}' }</div>
-                  <h3 className="text-sm font-medium text-gray-600 mb-2">Paste calldata or a transaction hash to get started</h3>
-                  <p className="text-xs text-gray-700 max-w-md mx-auto">
+                  <h3 className="text-sm font-medium text-gray-500 mb-2">Paste calldata or a transaction hash to get started</h3>
+                  <p className="text-xs text-gray-500 max-w-md mx-auto">
                     Supports multicall, aggregate, batch transactions, Gnosis Safe multiSend,
                     Uniswap Universal Router, and any nested ABI-encoded calls. Paste a tx hash
                     to fetch calldata directly from the blockchain.
@@ -402,18 +402,18 @@ export default function App() {
           </main>
 
           <footer className="mt-12 pt-6 border-t border-gray-900 text-center">
-            <p className="text-xs text-gray-700 max-w-2xl mx-auto">
+            <p className="text-xs text-gray-500 max-w-2xl mx-auto">
               Decoding runs in your browser; there is no backend. Unknown function selectors are looked up on public
               signature databases, and tx hashes, ENS names and token details on public RPCs, so those services see
               them. Turn on Offline mode to send nothing.
             </p>
-            <p className="mt-2 text-xs text-gray-700">
+            <p className="mt-2 text-xs text-gray-500">
               Signatures via{' '}
               <a
                 href="https://4byte.sourcify.dev"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-gray-600 hover:text-gray-400"
+                className="text-gray-500 hover:text-gray-400"
                 aria-label="Sourcify 4byte function signature database (opens in new tab)"
               >
                 Sourcify 4byte
@@ -423,7 +423,7 @@ export default function App() {
                 href="https://openchain.xyz"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-gray-600 hover:text-gray-400"
+                className="text-gray-500 hover:text-gray-400"
                 aria-label="OpenChain.xyz function signature lookup (opens in new tab)"
               >
                 openchain.xyz
@@ -433,7 +433,7 @@ export default function App() {
                 href="https://www.4byte.directory"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-gray-600 hover:text-gray-400"
+                className="text-gray-500 hover:text-gray-400"
                 aria-label="4byte.directory function signature lookup (opens in new tab)"
               >
                 4byte.directory

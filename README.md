@@ -21,10 +21,13 @@ A **client-side** web tool that recursively decodes Ethereum transaction calldat
 ## Features
 
 - **Recursive decoding** -- Multicalls, `aggregate`, `multiSend`, and nested `bytes` fields are expanded automatically into a navigable tree
+- **Router plans** -- Uniswap Universal Router commands and v4 actions (`V4_SWAP` → swap / settle / take), and Enso weiroll shortcuts (each step's target, function and call type) are spelled out instead of shown as opaque bytes
+- **Hidden-data checks** -- Bytes after the ABI arguments are shown and classified (ERC-8021 builder codes, Across integrator IDs, short frontend tags vs. long unexplained tails); non-canonical encodings are flagged
 - **Transaction hash lookup** -- Paste a tx hash instead of raw calldata; the tool fetches calldata from public Ethereum RPCs
 - **3-tier signature resolution** -- Bundled ABIs (instant) -> [openchain.xyz](https://openchain.xyz) -> [4byte.directory](https://www.4byte.directory) as fallback
 - **Token-aware formatting** -- When sibling parameters include **known token addresses**, adjacent `uint256` amounts use that token’s decimals and symbol (and, for configured stablecoins, an approximate USD peg line where applicable)
-- **Smart value interpretation** -- EIP-55 checksummed addresses with explorer links, known contract labels, timestamp detection, max-uint256 detection, zero address labeling
+- **Smart value interpretation** -- EIP-55 checksummed addresses with explorer links, known contract labels, timestamp detection, max-uint256 detection, zero address labeling, router sentinels (`MSG_SENDER`, `CONTRACT_BALANCE`, native-coin placeholders)
+- **Warnings** -- Unlimited approvals and permits (ERC-20, EIP-2612, DAI, Permit2 incl. Universal Router permits), Safe DELEGATECALLs, swaps with no slippage limit, large transfers, unverified tokens, malformed batches
 - **Confidence scoring** -- When multiple signatures match a selector, candidates are scored (an exact, canonical fit of every byte wins) and the best match is shown with alternatives available
 - **Offline mode** -- Toggle to use only bundled ABIs with zero network requests
 - **Custom ABI support** -- Paste a contract ABI JSON for guaranteed-correct decoding with named parameters
@@ -37,7 +40,7 @@ A **client-side** web tool that recursively decodes Ethereum transaction calldat
 Bundled function signatures and contract labels speed up **common** patterns when the `to` selector and shapes match—they do **not** limit what raw calldata you can paste.
 
 - Multicall2 / Multicall3 (`aggregate`, `tryAggregate`, `aggregate3`)
-- Uniswap V2 Router, V3 SwapRouter, SwapRouter02, Universal Router
+- Uniswap V2 Router, V3 SwapRouter, SwapRouter02, Universal Router (v1.x / v2 commands, v4 actions)
 - **Curve** Router (`exchange`, related routing)
 - **Pendle** Router V4 and related (`swapTokensToTokens`, limit router / SY paths where bundled)
 - ERC-20 / ERC-721 / ERC-1155 standard functions
@@ -45,9 +48,10 @@ Bundled function signatures and contract labels speed up **common** patterns whe
 - Gnosis Safe `execTransaction` / `multiSend`
 - Aave V3 Pool (`supply`, `withdraw`, `borrow`, `repay`)
 - Permit2
-- LayerZero-style `send` (e.g. bundled USDT0 OFT), Across SpokePool `deposit`, Enso-style `execute` / `commands[]` shortcuts (see `abiRegistry.ts` / `knownPatterns.ts` for the live set)
+- 1inch Aggregation Router V5 / V6 `swap`, CoW Protocol `settle` (per-trade token units)
+- LayerZero-style `send` (e.g. bundled USDT0 OFT), Across SpokePool `deposit`, Enso `routeMulti` / `executeShortcut` weiroll scripts (see `abiRegistry.ts` / `knownPatterns.ts` / `universalRouter.ts` for the live set)
 
-**Stablecoins & peg-like assets** (among many ERC‑20 entries; multi-chain where noted in the registry): **USDC**, **USDT**, **DAI**, **fxUSD** / **fxBASE** (save), **GHO**, **crvUSD**, **FRAX**, **LUSD**, **PYUSD**, **RLUSD**, **USDS**, **USDe**, **sUSDe**, **sDAI**, **USDT0** (LayerZero OFT), plus common majors (**WETH**, **WBTC**, **LINK**, **UNI**, **AAVE**, **PENDLE**, …). Full tables live in **`src/lib/abiRegistry.ts`**.
+**Stablecoins & peg-like assets** (among many ERC‑20 entries; multi-chain where noted in the registry): **USDC**, **USDT**, **DAI**, **fxUSD** / **fxSP** (f(x) stability pool, "fxBASE"), **GHO**, **crvUSD**, **FRAX**, **LUSD**, **PYUSD**, **RLUSD**, **USDS**, **USDe**, **sUSDe**, **sDAI**, **USDT0** (LayerZero OFT), plus common majors (**WETH**, **WBTC**, **LINK**, **UNI**, **AAVE**, **PENDLE**, …). Full tables live in **`src/lib/abiRegistry.ts`**.
 
 ## Getting Started
 

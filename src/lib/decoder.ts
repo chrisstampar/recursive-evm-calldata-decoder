@@ -1,4 +1,4 @@
-import { AbiCoder, formatEther, getBytes, hexlify, type Interface } from 'ethers';
+import { AbiCoder, formatEther, getAddress, getBytes, hexlify, type Interface } from 'ethers';
 import type {
   DecodedCalldataOutcome,
   DecodedCall,
@@ -42,19 +42,44 @@ import {
   formatBool,
   coerceAbiDecodedBool,
   scanHexForWordAlignedPaddedAddresses,
+  looksLikeAddressNotNumber,
   tokenAmountWholePartExceedsPlausibleDisplay,
 } from './valueFormatter.ts';
 import {
   fetchErc4626UnderlyingAsset,
   fetchOnChainTokenDecimals,
+  getContractName,
   getTokenInfo,
   type TokenInfo,
 } from './abiRegistry.ts';
 import { annotateCurveRouterSwapParams } from './curveRouterSwapParams.ts';
+import {
+  ROUTER_ADDRESS_SENTINELS,
+  ROUTER_CONTRACT_BALANCE,
+  UNIVERSAL_ROUTER_COMMANDS,
+  UNIVERSAL_ROUTER_EXECUTE_SELECTORS,
+  V4_ROUTER_ACTIONS,
+  type RouterStepSpec,
+  type TokenFlow,
+} from './universalRouter.ts';
 import { formatDestinationChainInterpretation, getChain } from './chains.ts';
 import { reverseResolveEns } from './ensLookup.ts';
 
+/**
+ * ABI offsets may point many values at the same bytes, so a small payload can decode into a huge tree (and ethers
+ * copies the remaining buffer for every dynamic element). ethers rejects decodes that read more than N× their input;
+ * its default N = 1024 lets a 60 KB multicall expand to ~60 MB per frame. Canonical encodings read each word about
+ * once, so 16× leaves ample room while rejecting shared-offset bombs. (Process-wide ethers setting; this app only
+ * decodes ABI data through this module and ethers' own RPC result parsing, both canonical.)
+ */
+const MAX_ABI_INFLATION = 16;
+AbiCoder._setDefaultMaxInflation(MAX_ABI_INFLATION);
+
 const coder = AbiCoder.defaultAbiCoder();
+
+function isAbiInflationError(e: unknown): boolean {
+  return e instanceof Error && /inflation ratio/.test(e.message);
+}
 
 const DEPRECATED_SCORE_PENALTY = 400;
 
@@ -94,7 +119,13 @@ const ACROSS_SPOKE_DEPOSIT_SELECTOR = '0xad5425c6' as const;
 
 /** 1inch Aggregation Router `swap`: `desc` tuple holds src/dst tokens; early tuple enrichment skips uints when ≥2 tokens. */
 const ONEINCH_AGG_SWAP_SELECTOR_V5 = '0x12aa3caf' as const;
-const ONEINCH_AGG_SWAP_SELECTOR_V6 = '0x90411a32' as const;
+/** V6 `swap(executor, desc, data)`: same 7-field SwapDescription as V5, without the permit argument. */
+const ONEINCH_AGG_SWAP_SELECTOR_V6 = '0x07ed2379' as const;
+/** Older / alternate 1inch `swap` with a 10-field descriptor (seen inside Enso and aggregator commands). */
+const ONEINCH_AGG_SWAP_SELECTOR_ALT10 = '0x90411a32' as const;
+
+/** 0xEeee…EEeE: the native-coin placeholder used by 1inch, ParaSwap, KyberSwap, LI.FI and others. */
+const NATIVE_COIN_PLACEHOLDER_LOWER = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 
 /** Uniswap V3 SwapRouter `exactInputSingle` / `exactOutputSingle` — same param tuple layout. */
 const UNISWAP_V3_EXACT_INPUT_SINGLE_SELECTOR = '0x414bf389' as const;
@@ -248,8 +279,27 @@ export async function decodeCalldata(
             remaining: MAX_REMOTE_SIGNATURE_LOOKUPS_PER_DECODE,
             exhaustedWarned: false,
           },
+          decodeFrameBudget: options.decodeFrameBudget ?? { remaining: MAX_DECODE_FRAMES_PER_DECODE, exhaustedWarned: false },
         }
       : options;
+
+  if (depth > 0 && opts.decodeFrameBudget) {
+    const budget = opts.decodeFrameBudget;
+    if (budget.remaining <= 0) {
+      if (!budget.exhaustedWarned) {
+        budget.exhaustedWarned = true;
+        pushDecodeWarning(opts, {
+          severity: 'warning',
+          title: 'Decode work limit reached',
+          context: `This calldata needed more than ${MAX_DECODE_FRAMES_PER_DECODE} nested decodes.`,
+          message:
+            'Remaining nested payloads are shown as raw bytes. Legitimate transactions stay far below this; extreme fan-out (for example many array entries pointing at the same nested data) is a sign of a crafted payload.',
+        });
+      }
+      return { status: 'error', error: 'Decode work limit reached', rawHex: truncateHexForErrorPreview(calldata) };
+    }
+    budget.remaining--;
+  }
 
   throwIfDecodeAborted(opts);
 
@@ -414,6 +464,12 @@ export async function decodeCalldata(
   return scored;
 }
 
+/**
+ * Nested `decodeCalldata` frames per top-level decode. Real transactions in the Nov 2026 corpus needed at most a few
+ * hundred (packed-payload offset scans are the heavy case at up to 200 attempts each).
+ */
+const MAX_DECODE_FRAMES_PER_DECODE = 3_000;
+
 /** Distinct unknown selectors one decode may send to public signature APIs (each costs up to 3 requests). */
 const MAX_REMOTE_SIGNATURE_LOOKUPS_PER_DECODE = 25;
 
@@ -462,7 +518,15 @@ async function scoreAndDecode(
     throwIfDecodeAbortedEvery(options, ci);
     const candidate = candidates[ci];
     try {
-      const decoded = tryDecode(candidate, paramsHex);
+      const decoded = tryDecode(candidate, paramsHex, () => {
+        pushDecodeWarning(options, {
+          severity: 'danger',
+          title: 'Calldata reuses the same data many times',
+          context: `Selector ${selector}: decoding as ${candidate.textSignature} would read more than ${MAX_ABI_INFLATION}× the payload size.`,
+          message:
+            'Several ABI offsets point at the same bytes. Standard encoders never do this; it is a way to make a small payload expand enormously. The payload was not expanded.',
+        });
+      });
       if (!decoded) continue;
       const encodingCheck = checkCanonicalEncoding(candidate, decoded, paramsHex);
 
@@ -509,7 +573,24 @@ async function scoreAndDecode(
   return scored[0].result;
 }
 
-function tryDecode(sig: FunctionSignature, paramsHex: string): unknown[] | null {
+/**
+ * ethers defers some decode errors (e.g. an `address` word with dirty high bytes) until the value is read; a nested
+ * one would otherwise surface later as a display string like "value exceeds width". Read everything up front.
+ */
+function hasDeferredDecodeError(v: unknown): boolean {
+  if (Array.isArray(v)) {
+    try {
+      for (let i = 0; i < v.length; i++) {
+        if (hasDeferredDecodeError(v[i])) return true;
+      }
+    } catch {
+      return true;
+    }
+  }
+  return false;
+}
+
+function tryDecode(sig: FunctionSignature, paramsHex: string, onInflation?: () => void): unknown[] | null {
   const paramTypes = sig.params.map(p => p.type);
   if (paramTypes.length === 0 && paramsHex === '0x') {
     return [];
@@ -518,11 +599,18 @@ function tryDecode(sig: FunctionSignature, paramsHex: string): unknown[] | null 
   // Prefer decoding as a flat parameter list. Wrapping as `(type0,type1,...)` and taking `result[0]`
   // breaks single dynamic array params (e.g. `bytes[]`): `result[0]` is the whole array, not `[array]`.
   try {
-    return [...coder.decode(paramTypes, paramsHex)];
-  } catch {
+    const flat = [...coder.decode(paramTypes, paramsHex)];
+    if (hasDeferredDecodeError(flat)) return null;
+    return flat;
+  } catch (e) {
+    if (isAbiInflationError(e)) {
+      onInflation?.();
+      return null;
+    }
     try {
       const tupleType = `(${paramTypes.join(',')})`;
       const result = coder.decode([tupleType], paramsHex);
+      if (hasDeferredDecodeError([...result])) return null;
       const inner = result[0] as unknown;
       if (paramTypes.length === 1) {
         return [inner];
@@ -695,10 +783,26 @@ async function processDecodedParams(
     callTarget: pattern ? findCallTargetArgument(sig.params, decoded) : undefined,
   };
 
+  // Universal Router `execute(commands, inputs[, deadline])`: inputs are per-command argument lists, not calldata.
+  const isUniversalRouter =
+    UNIVERSAL_ROUTER_EXECUTE_SELECTORS.has(selector.toLowerCase()) &&
+    sig.params[0]?.type === 'bytes' &&
+    sig.params[1]?.type === 'bytes[]';
+
   for (let i = 0; i < sig.params.length; i++) {
     throwIfDecodeAbortedEvery(options, i);
     const { name, type, components } = sig.params[i];
     const raw = decoded[i];
+
+    if (isUniversalRouter && (i === 0 || i === 1)) {
+      const value: DecodedValue =
+        i === 0
+          ? { kind: 'bytes', hex: toRawHex(raw) }
+          : await convertRouterSteps(UNIVERSAL_ROUTER_COMMANDS, toRawHex(decoded[0]), raw, childOptions, depth, patternNestingDepth, 'command');
+      throwIfDecodeAborted(options);
+      params.push({ name, type, value, rawHex: toRawHex(raw) });
+      continue;
+    }
 
     const calldataHints = pattern
       ? pattern.calldataIndices.filter(ci => ci.paramIndex === i)
@@ -732,7 +836,8 @@ async function processDecodedParams(
   await enrichParamsWithTokenContext(params, options, sig, depth);
   throwIfDecodeAborted(options);
   enrichDestinationChainIdLabels(params);
-  enrichEnsoExecuteShortcutLeavesInterpretation(params, selector, sig);
+  await annotateWeirollCommands(params, selector, sig, options);
+  throwIfDecodeAborted(options);
   await enrichAddressNodesWithEns(params, options);
   throwIfDecodeAborted(options);
   return params;
@@ -771,6 +876,268 @@ function findCallTargetArgument(
     if (typeof v === 'string') return v;
   }
   return undefined;
+}
+
+/**
+ * Decode a Universal Router command list or a v4 `V4_SWAP` action list: `steps[i]` (one byte each) says how to read
+ * `inputs[i]`. A step is only shown as decoded when its input re-encodes exactly under the table's types.
+ */
+async function convertRouterSteps(
+  table: Readonly<Record<number, RouterStepSpec>>,
+  stepsHex: string,
+  rawInputs: unknown,
+  options: DecodeOptions,
+  depth: number,
+  patternNestingDepth: number,
+  stepKind: 'command' | 'action',
+): Promise<DecodedValue> {
+  let steps: Uint8Array;
+  try {
+    steps = getBytes(stepsHex);
+  } catch {
+    steps = new Uint8Array();
+  }
+  const inputs = Array.isArray(rawInputs) ? rawInputs : [];
+  const capped = inputs.slice(0, DEFAULT_MAX_PATTERN_ARRAY_EXPAND);
+  if (steps.length !== inputs.length) {
+    pushDecodeWarning(options, {
+      severity: 'warning',
+      title: `Router ${stepKind} count mismatch`,
+      context: `${steps.length} ${stepKind} byte(s) but ${inputs.length} input(s).`,
+      message: 'The router reverts when these lengths differ; the pairing shown below may be off.',
+    });
+  }
+  const elements: DecodedValue[] = [];
+  for (let i = 0; i < capped.length; i++) {
+    throwIfDecodeAbortedEvery(options, i);
+    const inputHex = toRawHex(capped[i]);
+    const byte = steps[i];
+    if (byte === undefined) {
+      elements.push({ kind: 'bytes', hex: inputHex });
+      continue;
+    }
+    const id = stepKind === 'command' ? byte & 0x3f : byte;
+    const allowRevert = stepKind === 'command' && (byte & 0x80) !== 0;
+    const spec = table[id];
+    const call = spec
+      ? await decodeRouterStep(spec, id, allowRevert, inputHex, options, depth, patternNestingDepth)
+      : null;
+    throwIfDecodeAborted(options);
+    elements.push(call ? { kind: 'bytes', hex: inputHex, decoded: call } : { kind: 'bytes', hex: inputHex });
+  }
+  return { kind: 'array', elementType: 'bytes', elements };
+}
+
+async function decodeRouterStep(
+  spec: RouterStepSpec,
+  id: number,
+  allowRevert: boolean,
+  inputHex: string,
+  options: DecodeOptions,
+  depth: number,
+  patternNestingDepth: number,
+): Promise<DecodedCall | null> {
+  const stepSelector = `0x${id.toString(16).padStart(2, '0')}` as HexSelector;
+  const name = allowRevert ? `${spec.name} (allow revert)` : spec.name;
+
+  if (spec.kind === 'calldata') {
+    const r = await decodeCalldata(inputHex, { ...options, callTarget: undefined }, depth + 1, patternNestingDepth + 1);
+    return r.status === 'success' || r.status === 'partial' ? r.call : null;
+  }
+
+  const variants: SignatureParam[][] =
+    spec.kind === 'args'
+      ? spec.variants
+      : [[
+          { name: spec.kind === 'v4-swap' ? 'actions' : 'commands', type: 'bytes' },
+          { name: spec.kind === 'v4-swap' ? 'params' : 'inputs', type: 'bytes[]' },
+        ]];
+
+  for (const variant of variants) {
+    const sig: FunctionSignature = {
+      selector: stepSelector,
+      name,
+      textSignature: `${name}(${variant.map(v => `${v.type} ${v.name}`).join(',')})`,
+      params: variant,
+      source: 'bundled',
+    };
+    const values = tryDecode(sig, inputHex);
+    if (!values || !checkCanonicalEncoding(sig, values, inputHex).exact) continue;
+
+    let params: DecodedParam[];
+    if (spec.kind === 'args') {
+      // Byte params here are paths, signatures and hook data, never calldata: keep probes off public APIs.
+      params = await processDecodedParams(
+        values,
+        sig,
+        stepSelector,
+        { ...options, callTarget: undefined, bundledOnlySignatureLookup: true },
+        depth + 1,
+        patternNestingDepth + 1,
+      );
+      if (spec.tokenFlow) await applyRouterTokenFlow(spec.tokenFlow, params, options);
+      else await applyRouterCurrencyAmounts(params, options);
+      annotateRouterConstants(params, options);
+    } else {
+      const table = spec.kind === 'v4-swap' ? V4_ROUTER_ACTIONS : UNIVERSAL_ROUTER_COMMANDS;
+      const steps = await convertRouterSteps(
+        table,
+        toRawHex(values[0]),
+        values[1],
+        options,
+        depth + 1,
+        patternNestingDepth + 1,
+        spec.kind === 'v4-swap' ? 'action' : 'command',
+      );
+      params = [
+        { name: variant[0].name, type: 'bytes', value: { kind: 'bytes', hex: toRawHex(values[0]) } },
+        { name: variant[1].name, type: 'bytes[]', value: steps },
+      ];
+    }
+    return {
+      selector: stepSelector,
+      signature: sig,
+      params,
+      confidence: 'exact',
+      alternatives: [],
+      depth: depth + 1,
+      rawCalldata: inputHex,
+    };
+  }
+  return null;
+}
+
+/** Token for a router currency: `address(0)` is the chain's native coin in Uniswap v4. */
+async function resolveRouterCurrency(address: string | undefined, options: DecodeOptions): Promise<TokenInfo | undefined> {
+  if (!address) return undefined;
+  if (address.toLowerCase() === ZERO_ADDRESS_LOWER) {
+    return { symbol: getChain(options.chainId).nativeCurrency, decimals: 18 };
+  }
+  return resolveTokenInfo(address, options);
+}
+
+function addressOf(v: DecodedValue | undefined): string | undefined {
+  return v?.kind === 'address' ? v.address : undefined;
+}
+
+/** Give a swap step's amounts the units of its input / output token (paths are packed or nested, not top-level). */
+async function applyRouterTokenFlow(flow: TokenFlow, params: DecodedParam[], options: DecodeOptions): Promise<void> {
+  let tokenIn: string | undefined;
+  let tokenOut: string | undefined;
+  let amountA: DecodedParam | undefined; // amountIn (exact in) / amountOut (exact out)
+  let amountB: DecodedParam | undefined; // amountOutMin (exact in) / amountInMax (exact out)
+
+  if (flow.kind === 'v3-path' || flow.kind === 'v2-path') {
+    amountA = params[1];
+    amountB = params[2];
+    const path = params[3]?.value;
+    let first: string | undefined;
+    let last: string | undefined;
+    if (flow.kind === 'v3-path' && path?.kind === 'bytes') {
+      const body = path.hex.slice(2);
+      if (body.length >= 80) {
+        first = `0x${body.slice(0, 40)}`;
+        last = `0x${body.slice(-40)}`;
+      }
+    } else if (flow.kind === 'v2-path' && path?.kind === 'array') {
+      first = addressOf(path.elements[0]);
+      last = addressOf(path.elements[path.elements.length - 1]);
+    }
+    // v3 exact-out paths are encoded output-first; v2 paths are always input-first.
+    [tokenIn, tokenOut] = flow.kind === 'v3-path' && flow.exactOut ? [last, first] : [first, last];
+  } else {
+    const t = params[0]?.value;
+    if (t?.kind !== 'tuple') return;
+    const f = t.fields;
+    if (flow.kind === 'v4-single') {
+      // (poolKey, zeroForOne, amountA, amountB, [minHopPriceX36,] hookData)
+      amountA = f[2];
+      amountB = f[3];
+      const key = f[0]?.value;
+      const zeroForOne = f[1]?.value.kind === 'primitive' && f[1].value.display === 'true';
+      if (key?.kind === 'tuple') {
+        const c0 = addressOf(key.fields[0]?.value);
+        const c1 = addressOf(key.fields[1]?.value);
+        [tokenIn, tokenOut] = zeroForOne ? [c0, c1] : [c1, c0];
+      }
+    } else {
+      // (currency, path, [minHopPriceX36[],] amountA, amountB)
+      amountA = f[f.length - 2];
+      amountB = f[f.length - 1];
+      const currency = addressOf(f[0]?.value);
+      const path = f[1]?.value;
+      const hops = path?.kind === 'array' ? path.elements : [];
+      const hopCurrency = (h: DecodedValue | undefined) => (h?.kind === 'tuple' ? addressOf(h.fields[0]?.value) : undefined);
+      if (flow.exactOut) {
+        tokenOut = currency;
+        tokenIn = hopCurrency(hops[0]);
+      } else {
+        tokenIn = currency;
+        tokenOut = hopCurrency(hops[hops.length - 1]);
+      }
+    }
+  }
+
+  const [inInfo, outInfo] = await Promise.all([resolveRouterCurrency(tokenIn, options), resolveRouterCurrency(tokenOut, options)]);
+  throwIfDecodeAborted(options);
+  const unitA = flow.exactOut ? outInfo : inInfo;
+  const unitB = flow.exactOut ? inInfo : outInfo;
+  if (amountA && unitA) applyTokenContextToUintPrimitive(amountA.type, amountA.value, unitA, true);
+  if (amountB && unitB) applyTokenContextToUintPrimitive(amountB.type, amountB.value, unitB, true);
+}
+
+/**
+ * Settle / take / sweep steps: `currency` + one amount. The generic pass already handles ERC-20s; this adds the
+ * native coin, which v4 encodes as `address(0)`.
+ */
+async function applyRouterCurrencyAmounts(params: DecodedParam[], options: DecodeOptions): Promise<void> {
+  const currencyP = params.find(q => q.name === 'currency' || q.name === 'token');
+  const currency = addressOf(currencyP?.value);
+  if (!currency || currency.toLowerCase() !== ZERO_ADDRESS_LOWER) return;
+  const native = await resolveRouterCurrency(currency, options);
+  if (!native) return;
+  for (const q of params) {
+    if (/^(amount|maxAmount|minAmount|amountMax|amountMin|value)$/.test(q.name)) {
+      applyTokenContextToUintPrimitive(q.type, q.value, native, true);
+    }
+  }
+}
+
+const UINT256_MAX = (1n << 256n) - 1n;
+
+/**
+ * Router sentinels: recipient `address(1)` / `address(2)`, `address(0)` as the native coin in v4 currency fields,
+ * `CONTRACT_BALANCE`, and type(uint256).max as "no cap" (it is a limit here, not an approval).
+ */
+function annotateRouterConstants(params: DecodedParam[], options: DecodeOptions): void {
+  const native = getChain(options.chainId).nativeCurrency;
+  const visit = (v: DecodedValue, name: string): void => {
+    if (v.kind === 'address') {
+      const s = ROUTER_ADDRESS_SENTINELS[v.address.toLowerCase()];
+      if (s) v.label = s;
+      else if (v.address.toLowerCase() === ZERO_ADDRESS_LOWER && /currency/i.test(name)) {
+        v.label = `native ${native} (address(0) in Uniswap v4)`;
+      }
+    } else if (v.kind === 'primitive') {
+      try {
+        const n = BigInt(v.raw);
+        if (n === ROUTER_CONTRACT_BALANCE) {
+          v.interpretation = "CONTRACT_BALANCE: the router's entire balance of this token";
+          v.tokenAmount = undefined;
+        } else if (n === UINT256_MAX && !/approv|allowance/i.test(name)) {
+          v.interpretation = 'type(uint256).max: no limit';
+          v.tokenAmount = undefined;
+        }
+      } catch {
+        /* not numeric */
+      }
+    } else if (v.kind === 'tuple') {
+      v.fields.forEach(f => visit(f.value, f.name));
+    } else if (v.kind === 'array') {
+      v.elements.forEach(e => visit(e, name));
+    }
+  };
+  params.forEach(p => visit(p.value, p.name));
 }
 
 /** `uint` / `uint256` / … only (not `uint256[]` or tuples). */
@@ -812,25 +1179,65 @@ function enrichDestinationChainIdLabels(params: DecodedParam[]): void {
   for (const p of params) enrichDestinationChainIdOnParam(p);
 }
 
+/** weiroll call types (low two bits of the flags byte). */
+const WEIROLL_CALL_TYPES = ['DELEGATECALL', 'CALL', 'STATICCALL', 'CALL with value'] as const;
+const WEIROLL_FLAG_EXTENDED_COMMAND = 0x40;
+const WEIROLL_FLAG_TUPLE_RETURN = 0x80;
+const WEIROLL_FLAG_DATA = 0x20;
+
 /**
- * Enso `leaves` are `bytes32[]` route step ids (opaque on-chain), not ABI calldata — unlike `commands[]`, they do not
- * decode as nested function calls. Adds UI copy so users are not looking for a missing nested decode.
+ * Enso `executeShortcut(accountId, requestId, bytes32[] commands, bytes[] state)` runs a weiroll script. Each command
+ * word packs one call: `selector (4) ‖ flags (1) ‖ input state slots (6) ‖ output slot (1) ‖ target (20)`. Spell it
+ * out so the user sees which contract and function every step calls, and how (CALL / DELEGATECALL / …).
+ * @see https://github.com/weiroll/weiroll#command-structure
  */
-function enrichEnsoExecuteShortcutLeavesInterpretation(
+async function annotateWeirollCommands(
   params: DecodedParam[],
   selector: string,
   sig: FunctionSignature,
-): void {
-  if (selector.toLowerCase() !== ENSO_EXECUTE_SHORTCUT_SELECTOR) return;
-  if (sig.name !== 'executeShortcut') return;
-  const leaves = params.find(p => p.name === 'leaves');
-  if (!leaves || leaves.value.kind !== 'array') return;
-  if (leaves.value.elementType.replace(/\s/g, '') !== 'bytes32') return;
-  const note = 'Enso route leaf id (opaque bytes32; nested calldata is under commands[])';
-  for (const el of leaves.value.elements) {
+  options: DecodeOptions,
+): Promise<void> {
+  if (selector.toLowerCase() !== ENSO_EXECUTE_SHORTCUT_SELECTOR || sig.name !== 'executeShortcut') return;
+  const commands = params[2];
+  if (!commands || commands.value.kind !== 'array' || commands.value.elementType.replace(/\s/g, '') !== 'bytes32') return;
+  commands.fieldHint =
+    'weiroll script: each word is one call (function selector, call type, input/output state slots, target). Values and raw calldata live in `state`.';
+
+  // 0xfe passes the whole state array; 0xfb–0xfd are markers in Enso's weiroll extension (array / tuple building).
+  const slot = (b: number) =>
+    b === 0xfe ? 'the whole state' : b >= 0xfb ? `marker 0x${b.toString(16)}` : `state[${b & 0x7f}]${b & 0x80 ? ' (dynamic)' : ''}`;
+  let extendedFor: number | null = null;
+  const els = commands.value.elements;
+  for (let i = 0; i < els.length; i++) {
+    throwIfDecodeAbortedEvery(options, i);
+    const el = els[i];
     if (el.kind !== 'primitive') continue;
-    const prev = el.interpretation;
-    el.interpretation = prev ? `${prev} · ${note}` : note;
+    const body = el.raw.replace(/^0x/i, '').padStart(64, '0');
+    if (extendedFor !== null) {
+      const ins = (body.match(/../g) ?? []).map(h => parseInt(h, 16)).filter(b => b !== 0xff);
+      el.interpretation = `Input slots for command ${extendedFor}: ${ins.map(slot).join(', ') || 'none'}`;
+      extendedFor = null;
+      continue;
+    }
+    const fnSelector = `0x${body.slice(0, 8)}`;
+    const flags = parseInt(body.slice(8, 10), 16);
+    const ins = (body.slice(10, 22).match(/../g) ?? []).map(h => parseInt(h, 16)).filter(b => b !== 0xff);
+    const out = parseInt(body.slice(22, 24), 16);
+    const target = getAddress(`0x${body.slice(24)}`);
+    const label = getContractName(target, options.chainId);
+    const sigs = await lookupSelector(fnSelector, selectorLookupOptions(options));
+    throwIfDecodeAborted(options);
+    const fn = sigs[0]?.textSignature ?? `unknown function ${fnSelector}`;
+    const extended = (flags & WEIROLL_FLAG_EXTENDED_COMMAND) !== 0;
+    const parts = [
+      `${WEIROLL_CALL_TYPES[flags & 0x03]} ${target}${label ? ` (${label})` : ''}`,
+      fn,
+      flags & WEIROLL_FLAG_DATA ? 'raw calldata from a state slot' : extended ? 'inputs: see next word' : `inputs: ${ins.map(slot).join(', ') || 'none'}`,
+      out === 0xff ? 'output: discarded' : `output → ${slot(out)}${flags & WEIROLL_FLAG_TUPLE_RETURN ? ' (whole return tuple)' : ''}`,
+    ];
+    el.interpretation = parts.join(' · ');
+    el.embeddedEvmAddress = undefined;
+    if (extended) extendedFor = i;
   }
 }
 
@@ -954,6 +1361,9 @@ async function resolveTokenInfo(
   address: string,
   options: DecodeOptions,
 ): Promise<TokenInfo | undefined> {
+  if (address.toLowerCase() === NATIVE_COIN_PLACEHOLDER_LOWER) {
+    return { symbol: getChain(options.chainId).nativeCurrency, decimals: 18 };
+  }
   const reg = getTokenInfo(address, options.chainId);
   if (reg) return reg;
   if (options.offlineMode || options.fetchTokenDecimalsOnChain === false) return undefined;
@@ -1007,7 +1417,12 @@ function applyTokenContextToUintPrimitive(
     value.tokenAmount = tokenAmount;
     return;
   }
-  const val = BigInt(value.raw);
+  let val: bigint;
+  try {
+    val = BigInt(value.raw);
+  } catch {
+    return;
+  }
   if (val === 0n) return;
   if (tokenAmountWholePartExceedsPlausibleDisplay(value.raw, token.decimals)) {
     return;
@@ -1057,6 +1472,45 @@ async function tryEnrichErc20CallTarget(
   throwIfDecodeAborted(options);
   if (token) {
     applyTokenContextToUintPrimitive(amountP.type, amountP.value, token, true);
+  }
+  return true;
+}
+
+/** CoW Protocol GPv2Settlement `settle(tokens, clearingPrices, trades, interactions)`. */
+const COW_SETTLE_SELECTOR = '0x13d79a0b';
+
+/**
+ * CoW trades reference tokens by index into `tokens`: sellAmount / feeAmount are in tokens[sellTokenIndex],
+ * buyAmount in tokens[buyTokenIndex], and executedAmount in the sell token for sell orders (flags bit 0 = 0) or the
+ * buy token for buy orders.
+ */
+async function tryEnrichCowSettleTrades(
+  params: DecodedParam[],
+  options: DecodeOptions,
+  sig: FunctionSignature,
+): Promise<boolean> {
+  if (sig.selector.toLowerCase() !== COW_SETTLE_SELECTOR) return false;
+  const tokensV = params[0]?.value;
+  const tradesV = params[2]?.value;
+  if (tokensV?.kind !== 'array' || tradesV?.kind !== 'array') return true;
+  const tokenAt = (i: DecodedValue | undefined): string | undefined => {
+    if (i?.kind !== 'primitive') return undefined;
+    const n = Number(i.raw);
+    return Number.isInteger(n) ? addressOf(tokensV.elements[n]) : undefined;
+  };
+  for (const trade of tradesV.elements.slice(0, DEFAULT_MAX_PATTERN_ARRAY_EXPAND)) {
+    throwIfDecodeAborted(options);
+    if (trade.kind !== 'tuple' || trade.fields.length < 10) continue;
+    const f = trade.fields;
+    const [sellTok, buyTok] = await Promise.all([resolveTokenInfo(tokenAt(f[0].value) ?? '', options), resolveTokenInfo(tokenAt(f[1].value) ?? '', options)]);
+    const isBuyOrder = f[8].value.kind === 'primitive' && (BigInt(f[8].value.raw) & 1n) === 1n;
+    if (sellTok) {
+      applyTokenContextToUintPrimitive(f[3].type, f[3].value, sellTok, true);
+      applyTokenContextToUintPrimitive(f[7].type, f[7].value, sellTok, true);
+    }
+    if (buyTok) applyTokenContextToUintPrimitive(f[4].type, f[4].value, buyTok, true);
+    const execTok = isBuyOrder ? buyTok : sellTok;
+    if (execTok) applyTokenContextToUintPrimitive(f[9].type, f[9].value, execTok, true);
   }
   return true;
 }
@@ -1346,7 +1800,7 @@ function annotateOneInchSwapDescFieldHints(desc: DecodedParam, selectorLower: st
   desc.fieldHint =
     '1inch swap descriptor: sell/buy tokens and amounts live in fields 4–5; later uints are router metadata (flags, deadline, …), not extra token balances.';
 
-  if (selectorLower === ONEINCH_AGG_SWAP_SELECTOR_V6 && fields.length >= 10) {
+  if (selectorLower === ONEINCH_AGG_SWAP_SELECTOR_ALT10 && fields.length >= 10) {
     const hints = [
       'Token you sell (input to the route).',
       'Token you buy (output from the route).',
@@ -1365,7 +1819,7 @@ function annotateOneInchSwapDescFieldHints(desc: DecodedParam, selectorLower: st
     return;
   }
 
-  if (selectorLower === ONEINCH_AGG_SWAP_SELECTOR_V5 && fields.length >= 7) {
+  if ((selectorLower === ONEINCH_AGG_SWAP_SELECTOR_V5 || selectorLower === ONEINCH_AGG_SWAP_SELECTOR_V6) && fields.length >= 7) {
     const hints = [
       'Token you sell.',
       'Token you buy.',
@@ -1393,12 +1847,12 @@ async function tryEnrich1inchAggregationSwapDesc(
 ): Promise<boolean> {
   if (sig.name !== 'swap') return false;
   const sel = sig.selector.toLowerCase();
-  if (sel !== ONEINCH_AGG_SWAP_SELECTOR_V5 && sel !== ONEINCH_AGG_SWAP_SELECTOR_V6) return false;
+  if (sel !== ONEINCH_AGG_SWAP_SELECTOR_V5 && sel !== ONEINCH_AGG_SWAP_SELECTOR_V6 && sel !== ONEINCH_AGG_SWAP_SELECTOR_ALT10) return false;
 
   const desc = params.find(p => p.name === 'desc');
   if (!desc || desc.value.kind !== 'tuple') return false;
   const fields = desc.value.fields;
-  if (sel === ONEINCH_AGG_SWAP_SELECTOR_V6) {
+  if (sel === ONEINCH_AGG_SWAP_SELECTOR_ALT10) {
     if (fields.length < 10) return false;
   } else if (fields.length < 6) {
     return false;
@@ -1530,6 +1984,9 @@ async function enrichParamsWithTokenContext(
   if (await tryEnrichErc20CallTarget(params, options, sig)) {
     return;
   }
+  if (await tryEnrichCowSettleTrades(params, options, sig)) {
+    return;
+  }
 
   const skipTupleParents = new Set<DecodedParam>();
   await tryEnrichUniswapV3ExactSingleParamsTuple(params, options, sig, skipTupleParents);
@@ -1586,6 +2043,10 @@ const TOKEN_ADDRESS_PARAM_NAME = /token|asset|currency|underlying|coin|^_?path$|
  */
 async function applyGenericSingleTokenContext(fields: DecodedParam[], options: DecodeOptions): Promise<void> {
   const candidates = fields.filter(f => !NON_TOKEN_ADDRESS_PARAM_NAME.test(f.name.replace(/\s/g, '')));
+  // With several candidate addresses we can't know which one the amounts are in, even if only one of them
+  // resolves as a token (e.g. a swap descriptor with USDC in and an unlisted / native token out).
+  const candidateAddrs = collectDistinctAddressParamValues(candidates).filter(a => a.toLowerCase() !== ZERO_ADDRESS_LOWER);
+  if (candidateAddrs.length > 1) return;
   const resolvedMap = await collectResolvedTokensFromParams(candidates, options);
   throwIfDecodeAborted(options);
   if (resolvedMap.size !== 1) return;
@@ -1798,7 +2259,11 @@ async function convertValue(
       kind: 'address',
       address: raw,
       checksummed: fmt.checksummed,
-      label: fmt.label,
+      label:
+        fmt.label ??
+        (raw.toLowerCase() === NATIVE_COIN_PLACEHOLDER_LOWER
+          ? `native ${getChain(options.chainId).nativeCurrency} (0xEeee… placeholder)`
+          : undefined),
     };
   }
 
@@ -1828,7 +2293,8 @@ async function convertValue(
     return { kind: 'array', elementType: type, elements };
   }
 
-  if (type.startsWith('uint') || type.startsWith('int')) {
+  // Scalars only: `uint256[]` must reach the array branch below (it used to become one comma-joined "number").
+  if ((type.startsWith('uint') || type.startsWith('int')) && !type.endsWith(']')) {
     const str = String(raw);
     const fmt = formatUint256(str);
     return {
@@ -1858,9 +2324,12 @@ async function convertValue(
       return { kind: 'primitive', display: String(raw), raw: String(raw) };
     }
     const fmt = formatBytes32(asHex);
-    const embeddedCs = extractLeftPaddedAddressFromBytes32(asHex);
+    // Only surface a bytes32 as an address when it plausibly is one (or is a known contract): small values are numbers.
+    const paddedCs = extractLeftPaddedAddressFromBytes32(asHex);
+    const embeddedCs =
+      paddedCs && (looksLikeAddressNotNumber(paddedCs) || getContractName(paddedCs, options.chainId)) ? paddedCs : undefined;
     const embeddedEvmAddress = embeddedCs ? { checksummed: embeddedCs } : undefined;
-    const textNote = embeddedEvmAddress ? undefined : interpretBytes32AsLeftPaddedAddress(asHex);
+    const textNote = embeddedEvmAddress || paddedCs ? undefined : interpretBytes32AsLeftPaddedAddress(asHex);
     let interpretation = [fmt.asString, textNote].filter(Boolean).join(' · ') || undefined;
     if (!interpretation && !embeddedEvmAddress) {
       interpretation = 'Opaque 32-byte word';
@@ -2219,11 +2688,17 @@ async function convertBytesValue(
     const result = await decodeCalldata(cleanHex, options, depth + 1, nextPatternNest);
     throwIfDecodeAborted(options);
     if (result.status === 'success' || result.status === 'partial') {
-      return {
-        kind: 'bytes',
-        hex: cleanHex,
-        decoded: isKnownCalldata ? result.call : { ...result.call, speculative: true },
-      };
+      // Enso `state` slots mostly hold plain values; only a decode that uses every byte counts there.
+      const ensoState = outerPattern?.selector === ENSO_EXECUTE_SHORTCUT_SELECTOR;
+      if (isKnownCalldata && !ensoState) {
+        return { kind: 'bytes', hex: cleanHex, decoded: result.call };
+      }
+      // Opaque bytes only count as a nested call when some signature accounts for every byte, canonically. A
+      // real-transaction run showed junk zero-arg DB entries (e.g. `f7836435186477227()`) "decoding" signatures,
+      // proofs and packed blobs by ignoring everything after the selector.
+      if (!result.call.unparsedTrailingHex && !result.call.nonCanonicalEncoding) {
+        return { kind: 'bytes', hex: cleanHex, decoded: { ...result.call, speculative: true } };
+      }
     }
   }
 

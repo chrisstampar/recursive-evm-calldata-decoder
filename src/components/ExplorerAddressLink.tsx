@@ -170,7 +170,7 @@ export function ExplorerAddressLink({
           title="Resolving ENS on Ethereum…"
         >
           <span
-            className="inline-block size-3 shrink-0 rounded-full border border-gray-500 border-t-transparent animate-spin"
+            className="inline-block size-3 shrink-0 rounded-full border border-gray-500 border-t-transparent animate-spin motion-reduce:animate-none"
             aria-hidden
           />
           <span className="sr-only">Resolving ENS</span>
@@ -200,7 +200,7 @@ export function ExplorerAddressLink({
         <button
           type="button"
           onClick={() => void handleCopy()}
-          className="text-gray-600 hover:text-gray-400 transition-colors inline-flex shrink-0 items-center justify-center p-1 rounded touch-manipulation"
+          className="text-gray-500 hover:text-gray-400 transition-colors inline-flex shrink-0 items-center justify-center p-1 rounded touch-manipulation"
           title={copyFailed ? 'Copy failed' : copied ? 'Copied!' : 'Copy checksummed address'}
           aria-label={copyFailed ? 'Copy failed' : copied ? 'Copied' : 'Copy checksummed address'}
         >

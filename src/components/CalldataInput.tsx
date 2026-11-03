@@ -540,7 +540,7 @@ export function CalldataInput({
         <div className="flex-1" />
 
         <div className="flex items-center gap-1.5">
-          <span className="text-xs text-gray-600">Chain:</span>
+          <span className="text-xs text-gray-500">Chain:</span>
           <select
             value={chainId}
             onChange={e => {
@@ -577,11 +577,11 @@ export function CalldataInput({
             }}
             onKeyDown={handlePrimaryEnter}
             placeholder="0x5ae401dc00000000000000000000..."
-            className="w-full h-32 rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-sm font-mono text-gray-200 placeholder-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none resize-y"
+            className="w-full h-32 rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-sm font-mono text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none resize-y"
             spellCheck={false}
             autoComplete="off"
           />
-          <p className="mt-1 text-xs text-gray-600">
+          <p className="mt-1 text-xs text-gray-500">
             <kbd className="px-1 py-0.5 rounded bg-gray-800 border border-gray-700 font-mono text-[10px]">Enter</kbd>
             {' '}to decode ·{' '}
             <kbd className="px-1 py-0.5 rounded bg-gray-800 border border-gray-700 font-mono text-[10px]">Shift</kbd>
@@ -592,7 +592,7 @@ export function CalldataInput({
           </p>
           <div className="mt-3">
             <label htmlFor="optional-to-input" className="block text-sm font-medium text-gray-300 mb-1.5">
-              Contract address <span className="text-gray-600 font-normal">(optional)</span>
+              Contract address <span className="text-gray-500 font-normal">(optional)</span>
             </label>
             <div className="flex items-center gap-2">
               <input
@@ -607,7 +607,7 @@ export function CalldataInput({
                 onBlur={validateOptionalToOnBlur}
                 onKeyDown={handlePrimaryEnter}
                 placeholder="0x... (call target for proxy warnings & labels)"
-                className="min-w-0 flex-1 rounded-lg bg-gray-900 border border-gray-700 px-3 py-2 text-sm font-mono text-gray-200 placeholder-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                className="min-w-0 flex-1 rounded-lg bg-gray-900 border border-gray-700 px-3 py-2 text-sm font-mono text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                 spellCheck={false}
                 autoComplete="off"
                 aria-invalid={optionalToHint === 'invalid'}
@@ -625,7 +625,7 @@ export function CalldataInput({
                 This does not look like a valid checksummed address (blur to re-check).
               </p>
             )}
-            <p className="mt-1 text-xs text-gray-600">
+            <p className="mt-1 text-xs text-gray-500">
               Not required to decode. If set, used like a transaction <span className="font-mono text-gray-500">to</span> for known-contract labels and proxy notices.
             </p>
           </div>
@@ -642,11 +642,11 @@ export function CalldataInput({
             onChange={e => { setTxHash(e.target.value); setError(null); setTxInfo(null); }}
             onKeyDown={handlePrimaryEnter}
             placeholder={`0x1234...abcd (paste any ${currentChain.name} transaction hash)`}
-            className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-sm font-mono text-gray-200 placeholder-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+            className="w-full rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-sm font-mono text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
             spellCheck={false}
             autoComplete="off"
           />
-          <p className="mt-1 text-xs text-gray-600">
+          <p className="mt-1 text-xs text-gray-500">
             The calldata will be fetched from a public {currentChain.name} RPC and decoded automatically. Press{' '}
             <kbd className="px-1 py-0.5 rounded bg-gray-800 border border-gray-700 font-mono text-[10px]">Enter</kbd>
             {' '}to fetch and decode.
@@ -677,7 +677,7 @@ export function CalldataInput({
         >
           {currentlyLoading ? (
             <span className="flex items-center gap-2">
-              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+              <svg className="animate-spin motion-reduce:animate-none h-4 w-4" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>
@@ -718,7 +718,7 @@ export function CalldataInput({
           </label>
         )}
 
-        <span className="text-xs text-gray-600 hidden sm:inline">
+        <span className="text-xs text-gray-500 hidden sm:inline">
           {offlineMode
             ? 'Using bundled ABIs only'
             : skipEns
@@ -737,7 +737,7 @@ export function CalldataInput({
             value={abiJson}
             onChange={e => setAbiJson(e.target.value)}
             placeholder='[{"type":"function","name":"swap",...}]'
-            className="w-full min-h-40 h-40 rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-sm font-mono text-gray-200 placeholder-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none resize-y"
+            className="w-full min-h-40 h-40 rounded-lg bg-gray-900 border border-gray-700 px-3 py-2.5 text-sm font-mono text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none resize-y"
             spellCheck={false}
           />
           <p className="mt-1 text-xs text-gray-500">

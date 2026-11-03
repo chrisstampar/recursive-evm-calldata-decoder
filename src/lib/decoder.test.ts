@@ -658,7 +658,7 @@ describe('decodeCalldata — Enso routeMulti', () => {
     expect(routeParam?.value.kind).toBe('bytes');
     if (routeParam?.value.kind !== 'bytes') return;
     expect(routeParam.value.decoded?.signature.name).toBe('executeShortcut');
-    const commands = routeParam.value.decoded?.params.find(p => p.name === 'commands');
+    const commands = routeParam.value.decoded?.params.find(p => p.name === 'state');
     expect(commands?.value.kind).toBe('array');
     if (commands?.value.kind !== 'array') return;
     expect(commands.value.elements[0]?.kind).toBe('bytes');
@@ -679,12 +679,16 @@ describe('decodeCalldata — Enso routeMulti', () => {
     expect(warns.some(w => w.title === 'Enso executeShortcut')).toBe(true);
   });
 
-  it('executeShortcut leaves[] are opaque bytes32 with UI copy (not nested calldata)', async () => {
+  it('executeShortcut commands[] are spelled out as weiroll calls (target, function, call type, slots)', async () => {
     const iface = new Interface(['function executeShortcut(bytes32,bytes32,bytes32[],bytes[])']);
+    // approve(address,uint256) · CALL · inputs state[0], state[1] · output discarded · target USDC
+    const approveCmd = '0x095ea7b3' + '01' + '0001ffffffff' + 'ff' + 'a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
+    // unknown selector · DELEGATECALL · input state[2] (dynamic) · output -> state[3]
+    const delegateCmd = '0x12345678' + '00' + '82ffffffffff' + '03' + '1111111111111111111111111111111111111111';
     const calldata = iface.encodeFunctionData('executeShortcut', [
       '0x' + '11'.repeat(32),
       '0x' + '22'.repeat(32),
-      ['0x' + 'aa'.repeat(32), '0x' + 'bb'.repeat(32)],
+      [approveCmd, delegateCmd],
       [],
     ]);
     const res = await decodeCalldata(calldata, {
@@ -694,18 +698,18 @@ describe('decodeCalldata — Enso routeMulti', () => {
     });
     expect(res.status).toBe('success');
     if (res.status !== 'success') return;
-    expect(res.call.signature.name).toBe('executeShortcut');
-    const leaves = res.call.params.find(p => p.name === 'leaves');
-    expect(leaves?.value.kind).toBe('array');
-    if (leaves?.value.kind !== 'array') return;
-    expect(leaves.value.elements.length).toBe(2);
-    for (const el of leaves.value.elements) {
-      expect(el.kind).toBe('primitive');
-      if (el.kind !== 'primitive') continue;
-      expect(el.interpretation).toMatch(/Opaque 32-byte word/);
-      expect(el.interpretation).toMatch(/Enso route leaf id/);
-      expect(el.interpretation).toMatch(/commands\[\]/);
-    }
+    expect(res.call.params.map(p => p.name)).toEqual(['accountId', 'requestId', 'commands', 'state']);
+    const commands = res.call.params[2];
+    if (commands.value.kind !== 'array') throw new Error('array');
+    const [a, d] = commands.value.elements;
+    if (a.kind !== 'primitive' || d.kind !== 'primitive') throw new Error('primitive');
+    expect(a.interpretation).toMatch(/^CALL 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 \(USDC\)/);
+    expect(a.interpretation).toMatch(/approve\(address,uint256\)/);
+    expect(a.interpretation).toMatch(/inputs: state\[0\], state\[1\]/);
+    expect(a.interpretation).toMatch(/output: discarded/);
+    expect(d.interpretation).toMatch(/^DELEGATECALL 0x1111111111111111111111111111111111111111/);
+    expect(d.interpretation).toMatch(/state\[2\] \(dynamic\)/);
+    expect(d.interpretation).toMatch(/output → state\[3\]/);
   });
 
   it('unwraps Enso length-prefixed executeShortcut commands[] entries to nested calldata', async () => {
@@ -738,7 +742,7 @@ describe('decodeCalldata — Enso routeMulti', () => {
     if (res.status !== 'success') return;
     const routeParam = res.call.params.find(p => p.name === 'routeData');
     if (routeParam?.value.kind !== 'bytes' || !routeParam.value.decoded) return;
-    const commands = routeParam.value.decoded.params.find(p => p.name === 'commands');
+    const commands = routeParam.value.decoded.params.find(p => p.name === 'state');
     expect(commands?.value.kind).toBe('array');
     if (commands?.value.kind !== 'array') return;
     const cmd0 = commands.value.elements[0];

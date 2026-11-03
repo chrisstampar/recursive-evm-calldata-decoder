@@ -444,7 +444,7 @@ describe('L10 — bundled struct field names line up with their tuple types', ()
   it('every `components` list has one entry per tuple slot, recursively', () => {
     const check = (p: SignatureParam, where: string) => {
       if (!p.components) return;
-      const tuple = p.type.endsWith('[]') ? p.type.slice(0, -2) : p.type;
+      const tuple = p.type.replace(/(\[\d*\])+$/, '');
       const slots = splitTupleTypes(tuple.slice(1, -1));
       expect(p.components.map(c => c.type), where).toEqual(slots);
       p.components.forEach(c => check(c, `${where}.${c.name}`));
@@ -460,5 +460,26 @@ describe('M3 — amount-named params never read as timestamps', () => {
     const res = await decodeCalldata(ERC20.encodeFunctionData('transfer', [RECIPIENT, 1_500_000_000n]), opts);
     if (res.status !== 'success') throw new Error('decode failed');
     expect(primitive(res.call.params[1].value).interpretation ?? '').not.toMatch(/Timestamp/);
+  });
+});
+
+describe('L6 — guessed nested calls must account for every byte', () => {
+  const NFT = new Interface(['function safeTransferFrom(address from,address to,uint256 tokenId,bytes data)']);
+
+  it('keeps an exact nested decode inside an opaque `bytes` param, marked as guessed', async () => {
+    const inner = ERC20.encodeFunctionData('transfer', [RECIPIENT, 5n]);
+    const res = await decodeCalldata(NFT.encodeFunctionData('safeTransferFrom', [RECIPIENT, DAI, 1n, inner]), opts);
+    if (res.status !== 'success') throw new Error('decode failed');
+    const data = res.call.params[3].value;
+    expect(data.kind === 'bytes' && data.decoded?.signature.name).toBe('transfer');
+    expect(data.kind === 'bytes' && data.decoded?.speculative).toBe(true);
+  });
+
+  it('rejects a match that ignores most of the blob (junk zero-arg / short signatures)', async () => {
+    const blob = ERC20.encodeFunctionData('transfer', [RECIPIENT, 5n]) + 'ab'.repeat(65);
+    const res = await decodeCalldata(NFT.encodeFunctionData('safeTransferFrom', [RECIPIENT, DAI, 1n, blob]), opts);
+    if (res.status !== 'success') throw new Error('decode failed');
+    const data = res.call.params[3].value;
+    expect(data.kind === 'bytes' && data.decoded).toBeFalsy();
   });
 });

@@ -53,8 +53,8 @@ export const CHAINS: Record<number, ChainConfig> = {
     name: 'Ethereum',
     nativeCurrency: 'ETH',
     explorerUrl: 'https://etherscan.io',
+    // Checked 2026-11-02 from a browser origin: eth.llamarpc.com returns Cloudflare 525 (removed).
     rpcs: [
-      'https://eth.llamarpc.com',
       'https://ethereum-rpc.publicnode.com',
       'https://eth.drpc.org',
       'https://1rpc.io/eth',
@@ -66,10 +66,10 @@ export const CHAINS: Record<number, ChainConfig> = {
     nativeCurrency: 'ETH',
     explorerUrl: 'https://arbiscan.io',
     rpcTimeoutMs: 15_000,
+    // 1rpc.io/arb sends no Access-Control-Allow-Origin, so browsers can't use it (removed 2026-11-02).
     rpcs: [
       'https://arbitrum-one-rpc.publicnode.com',
       'https://arbitrum.drpc.org',
-      'https://1rpc.io/arb',
     ],
   },
   8453: {
@@ -91,8 +91,9 @@ export const CHAINS: Record<number, ChainConfig> = {
     nativeCurrency: 'POL',
     explorerUrl: 'https://polygonscan.com',
     rpcTimeoutMs: 15_000,
+    // polygon-rpc.com answers 401 "API key disabled" (removed 2026-11-02).
     rpcs: [
-      'https://polygon-rpc.com',
+      'https://polygon-bor-rpc.publicnode.com',
       'https://polygon.drpc.org',
       'https://1rpc.io/matic',
     ],
@@ -103,10 +104,11 @@ export const CHAINS: Record<number, ChainConfig> = {
     nativeCurrency: 'ETH',
     explorerUrl: 'https://optimistic.etherscan.io',
     rpcTimeoutMs: 15_000,
+    // 1rpc.io/op sends no Access-Control-Allow-Origin (replaced by publicnode 2026-11-02).
     rpcs: [
       'https://mainnet.optimism.io',
+      'https://optimism-rpc.publicnode.com',
       'https://optimism.drpc.org',
-      'https://1rpc.io/op',
     ],
   },
   999: {

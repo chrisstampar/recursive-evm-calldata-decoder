@@ -201,6 +201,11 @@ export interface DecodeOptions {
    */
   bundledOnlySignatureLookup?: boolean;
   /**
+   * @internal Nested decode frames left for this top-level decode (created at depth 0). ABI offsets can point many
+   * array elements at the same bytes, so a few KB of calldata could otherwise demand exponentially many decodes.
+   */
+  decodeFrameBudget?: { remaining: number; exhaustedWarned: boolean };
+  /**
    * Cooperative cancellation: `decodeCalldata` checks `signal.aborted` after `await`s and on a throttled schedule
    * in long indexed loops (see `ABORT_CHECK_INTERVAL` in `decoder.ts`)—not on every scalar step. For on-chain token
    * metadata, `fetchOnChainTokenDecimals` races `decimals()` / `symbol()` against the signal so new work stops when
