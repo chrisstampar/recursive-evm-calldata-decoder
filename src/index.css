@@ -1,5 +1,6 @@
 /* Tailwind v4 entry: compiled by `@tailwindcss/vite` in `vite.config.ts` (not the legacy PostCSS-only plugin). */
 @import "tailwindcss";
+@import "./theme-light.css";
 
 /* Class-driven dark mode (Tailwind v3-style `darkMode: 'class'`). Enables `dark:*` when `<html class="dark">` (or any `.dark` ancestor). */
 @custom-variant dark (&:where(.dark, .dark *));
@@ -14,10 +15,22 @@
 }
 @layer base {
   :root {
-    /* App-wide custom properties when not expressed via `@theme` / `theme()`. */
+    color-scheme: dark;
   }
 
   html {
     @apply antialiased;
+  }
+}
+
+/* "Show in tree" target: a brief outline so the eye lands on the right node. */
+.call-node[data-flash] {
+  outline: 2px solid var(--color-blue-400);
+  outline-offset: 2px;
+  transition: outline-color 0.3s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .call-node[data-flash] {
+    transition: none;
   }
 }

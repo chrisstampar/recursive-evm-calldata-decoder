@@ -4,6 +4,10 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { ErrorBoundary } from './components/ErrorBoundary.tsx'
+import { applyThemePreference, readThemePreference } from './lib/theme.ts'
+
+// Before the first render so a saved light/dark choice doesn't flash (the CSP blocks an inline <head> script).
+applyThemePreference(readThemePreference())
 
 window.addEventListener('unhandledrejection', (event) => {
   console.error('Unhandled promise rejection:', event.reason)

@@ -425,3 +425,35 @@ export function formatBytesLength(hex: string): string {
   const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
   return `${clean.length / 2} bytes`;
 }
+
+/** `NAME: meaning` prefixes (`CONTRACT_BALANCE: …`, `type(uint256).max: …`, `0: …`): a code-like token, no spaces. */
+const CODE_PREFIX_INTERPRETATION = /^([^\s:]{1,32}): (.+)$/s;
+
+/**
+ * Split a value's interpretation into the reading people want first ("100.1 USDT", "no limit") and the caveat that
+ * follows it ("≈ $100 USD (assumes $1 peg…)", "unverified token: …").
+ */
+export function splitInterpretation(text: string): { headline: string; note?: string } {
+  if (text.startsWith('Timestamp: ')) {
+    return { headline: text.slice('Timestamp: '.length), note: 'read as a Unix time' };
+  }
+  const code = CODE_PREFIX_INTERPRETATION.exec(text);
+  if (code) return { headline: code[2], note: code[1] };
+  const cut = [text.indexOf(' · '), text.indexOf(' (')].filter(i => i > 0);
+  if (cut.length === 0) return { headline: text };
+  const at = Math.min(...cut);
+  let note = text.slice(at).trim().replace(/^·\s*/, '');
+  if (isWrappedInParens(note)) note = note.slice(1, -1);
+  return { headline: text.slice(0, at), note };
+}
+
+/** `(…)` where the first `(` closes at the very end (so `(a) (b)` is not stripped). */
+function isWrappedInParens(s: string): boolean {
+  if (!s.startsWith('(') || !s.endsWith(')')) return false;
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === '(') depth++;
+    else if (s[i] === ')' && --depth === 0 && i < s.length - 1) return false;
+  }
+  return depth === 0;
+}

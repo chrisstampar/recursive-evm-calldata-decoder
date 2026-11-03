@@ -87,6 +87,8 @@ const KNOWN_CONTRACTS_RAW: Record<number, Record<string, ContractRegistryEntry>>
   '0x7a250d5630b4cf539739df2c5dacb4c659f2488d': { name: 'Uniswap V2 Router' },
   '0xe592427a0aece92de3edee1f18e0157c05861564': { name: 'Uniswap V3 SwapRouter' },
   '0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45': { name: 'Uniswap SwapRouter02' },
+  // Universal Router v2 (v4 pools); addresses per chain from Uniswap's v4 deployments, bytecode checked on-chain.
+  '0x66a9893cc07d91d95644aedd05d03f95e1dba8af': { name: 'Uniswap Universal Router v2', riskLevel: 'high' },
   '0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad': { name: 'Uniswap Universal Router', riskLevel: 'high' },
   '0xef1c6e67703c7bd7107eed8303fbe6ec2554bf6b': { name: 'Uniswap Universal Router V1', riskLevel: 'high' },
   '0x1111111254eeb25477b68fb85ed929f73a960582': { name: '1inch AggregationRouter V5', riskLevel: 'high' },
@@ -301,6 +303,7 @@ const KNOWN_CONTRACTS_RAW: Record<number, Record<string, ContractRegistryEntry>>
     },
     '0x000000000022d473030f116ddee9f6b43ac78ba3': { name: 'Permit2', riskLevel: 'critical' },
     '0xd9db270c1b5e3bd161e8c8503c55ceabee709552': { name: 'Gnosis Safe', riskLevel: 'high' },
+    '0x1095692a6237d83c6a72f3f5efedb9a670c49223': { name: 'Uniswap Universal Router v2', riskLevel: 'high' },
   },
 
   // Arbitrum One
@@ -313,6 +316,7 @@ const KNOWN_CONTRACTS_RAW: Record<number, Record<string, ContractRegistryEntry>>
     },
     '0x000000000022d473030f116ddee9f6b43ac78ba3': { name: 'Permit2', riskLevel: 'critical' },
     '0xd9db270c1b5e3bd161e8c8503c55ceabee709552': { name: 'Gnosis Safe', riskLevel: 'high' },
+    '0xa51afafe0263b40edaef0df8781ea9aa03e381a3': { name: 'Uniswap Universal Router v2', riskLevel: 'high' },
   },
 
   // Optimism
@@ -325,6 +329,7 @@ const KNOWN_CONTRACTS_RAW: Record<number, Record<string, ContractRegistryEntry>>
     },
     '0x000000000022d473030f116ddee9f6b43ac78ba3': { name: 'Permit2', riskLevel: 'critical' },
     '0xd9db270c1b5e3bd161e8c8503c55ceabee709552': { name: 'Gnosis Safe', riskLevel: 'high' },
+    '0x851116d9223fabed8e56c0e6b8ad0c31d98b3507': { name: 'Uniswap Universal Router v2', riskLevel: 'high' },
   },
 
   // Base (Aave V3 Pool address from bgd-labs aave-address-book `AaveV3Base`)
@@ -337,6 +342,7 @@ const KNOWN_CONTRACTS_RAW: Record<number, Record<string, ContractRegistryEntry>>
     },
     '0x000000000022d473030f116ddee9f6b43ac78ba3': { name: 'Permit2', riskLevel: 'critical' },
     '0xd9db270c1b5e3bd161e8c8503c55ceabee709552': { name: 'Gnosis Safe', riskLevel: 'high' },
+    '0x6ff5693b99212da76ad316178a184ab56d299b43': { name: 'Uniswap Universal Router v2', riskLevel: 'high' },
   },
 };
 

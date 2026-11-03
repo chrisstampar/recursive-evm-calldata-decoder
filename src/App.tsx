@@ -6,6 +6,10 @@ import { CalldataInput } from './components/CalldataInput.tsx';
 import { DecodeTree } from './components/DecodeTree.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 import { WarningBanner } from './components/WarningBanner.tsx';
+import { TxSummaryCard } from './components/TxSummaryCard.tsx';
+import { ThemeToggle } from './components/ThemeToggle.tsx';
+import { useRevealCall } from './components/useRevealCall.ts';
+import { TreeExpansionProvider } from './context/TreeExpansionContext.tsx';
 import { validateHexInput } from './lib/sanitize.ts';
 import { ChainProvider } from './context/ChainContext.ts';
 import { CHAINS, DEFAULT_CHAIN_ID } from './lib/chains.ts';
@@ -86,6 +90,54 @@ function getCalldataFromHash(): string | null {
   return null;
 }
 
+/** Identity of a result for resetting tree state (expansion, reveal) between decodes. */
+function resultKey(result: DecodeResult): string {
+  if (result.status === 'success' || result.status === 'partial') {
+    const raw = result.call.rawCalldata ?? '';
+    return `${result.status}:${raw.length}:${raw.slice(0, 48)}`;
+  }
+  return result.status === 'error' ? `error:${result.rawHex.slice(0, 48)}` : `native:${result.hash}`;
+}
+
+/**
+ * Summary, then warnings, then the full tree. They share one expansion provider so "Show in tree" in the summary
+ * and warnings can open the tree down to a call.
+ */
+function ResultPanels({
+  result,
+  decodeTimeMs,
+  autoExpandMaxDepth,
+}: {
+  result: DecodeResult;
+  decodeTimeMs: number | null;
+  autoExpandMaxDepth: number;
+}) {
+  const root = result.status === 'success' || result.status === 'partial' ? result.call : null;
+  const showInTree = useRevealCall(root);
+  return (
+    <>
+      {root && <TxSummaryCard call={root} onShowInTree={showInTree} />}
+
+      {result.status !== 'error' && result.warnings && result.warnings.length > 0 && (
+        <section>
+          <WarningBanner warnings={result.warnings} onShowInTree={root ? showInTree : undefined} />
+        </section>
+      )}
+
+      <section className="rounded-xl border border-gray-800 bg-gray-900/30 p-4 sm:p-6 overflow-x-auto min-w-0">
+        <ErrorBoundary>
+          <DecodeTree result={result} autoExpandMaxDepth={autoExpandMaxDepth} />
+        </ErrorBoundary>
+        {decodeTimeMs !== null && (
+          <p className="mt-4 text-xs text-gray-500 text-right">
+            Decoded in {decodeTimeMs}ms
+          </p>
+        )}
+      </section>
+    </>
+  );
+}
+
 export default function App() {
   const [result, setResult] = useState<DecodeResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -96,6 +148,8 @@ export default function App() {
   const [skipEns, setSkipEns] = useState(false);
   const [previewSampleWarnings, setPreviewSampleWarnings] = useState(false);
   const [autoExpandMaxDepth, setAutoExpandMaxDepth] = useState(() => readAutoExpandMaxDepthFromUrl());
+  /** Input shrinks to one line once something decoded; "Edit input" opens it again. */
+  const [inputCollapsed, setInputCollapsed] = useState(false);
 
   const decodeAbortRef = useRef<AbortController | null>(null);
   const lastDecodeRef = useRef<LastDecode | null>(null);
@@ -180,6 +234,7 @@ export default function App() {
           },
         ],
       });
+      setInputCollapsed(true);
       return;
     }
 
@@ -212,6 +267,7 @@ export default function App() {
       if (decoded.status === 'error') {
         clearUrlHash();
         setResult(decoded);
+        setInputCollapsed(false);
       } else {
         try {
           // Chain goes in the query so a shared link decodes with the same registry, decimals and explorer.
@@ -227,6 +283,7 @@ export default function App() {
         }
 
         setResult(decoded);
+        setInputCollapsed(true);
       }
     } catch (err) {
       if (ac.signal.aborted) return;
@@ -300,7 +357,7 @@ export default function App() {
         <div className="max-w-6xl mx-auto px-2 sm:px-4 py-6 sm:py-10">
           <header className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
             <div className="min-w-0">
-              <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
+              <h1 className="text-2xl sm:text-3xl font-bold text-gray-50 tracking-tight">
                 Recursive Calldata Decoder
               </h1>
               <p className="mt-2 text-sm text-gray-500 max-w-2xl">
@@ -308,20 +365,25 @@ export default function App() {
                 and nested calls are fully expanded into a human-readable tree.
               </p>
             </div>
-            <a
-              href={SOURCE_REPO_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="shrink-0 text-sm text-gray-500 hover:text-gray-300 underline-offset-2 hover:underline"
-              aria-label="View source on GitHub (opens in new tab)"
-            >
-              GitHub
-            </a>
+            <div className="flex items-center gap-4 shrink-0">
+              <ThemeToggle />
+              <a
+                href={SOURCE_REPO_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-gray-500 hover:text-gray-300 underline-offset-2 hover:underline"
+                aria-label="View source on GitHub (opens in new tab)"
+              >
+                GitHub
+              </a>
+            </div>
           </header>
 
           <main className="space-y-6">
-            <section className="rounded-xl border border-gray-800 bg-gray-900/30 p-4 sm:p-6">
+            <section className={`rounded-xl border border-gray-800 bg-gray-900/30 ${inputCollapsed ? 'px-4 py-3 sm:px-6' : 'p-4 sm:p-6'}`}>
               <CalldataInput
+                collapsed={inputCollapsed}
+                onExpand={() => setInputCollapsed(false)}
                 onDecode={handleDecode}
                 onAbortInFlightDecode={abortInFlightDecode}
                 isLoading={isLoading}
@@ -329,7 +391,7 @@ export default function App() {
                 chainId={chainId}
                 onChainChange={setChainId}
               />
-              {isDev && (
+              {isDev && !inputCollapsed && (
                 <div className="mt-4 pt-4 border-t border-gray-800 flex flex-wrap items-center gap-2">
                   <button
                     type="button"
@@ -367,23 +429,10 @@ export default function App() {
               </section>
             )}
 
-            {result && !isLoading && result.status !== 'error' && result.warnings && result.warnings.length > 0 && (
-              <section>
-                <WarningBanner warnings={result.warnings} />
-              </section>
-            )}
-
             {result && !isLoading && (
-              <section className="rounded-xl border border-gray-800 bg-gray-900/30 p-4 sm:p-6 overflow-x-auto min-w-0">
-                <ErrorBoundary>
-                  <DecodeTree result={result} autoExpandMaxDepth={autoExpandMaxDepth} />
-                </ErrorBoundary>
-                {decodeTimeMs !== null && (
-                  <p className="mt-4 text-xs text-gray-500 text-right">
-                    Decoded in {decodeTimeMs}ms
-                  </p>
-                )}
-              </section>
+              <TreeExpansionProvider key={resultKey(result)}>
+                <ResultPanels result={result} decodeTimeMs={decodeTimeMs} autoExpandMaxDepth={autoExpandMaxDepth} />
+              </TreeExpansionProvider>
             )}
 
             {!result && !isLoading && (

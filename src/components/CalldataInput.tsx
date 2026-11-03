@@ -103,6 +103,15 @@ interface CalldataInputProps {
   initialCalldata?: string | null;
   chainId: number;
   onChainChange: (chainId: number) => void;
+  /** After a decode, show the input as one line (what was decoded + Edit) so the results start higher up. */
+  collapsed?: boolean;
+  onExpand?: () => void;
+}
+
+/** Bytes in a `0x…` hex string, grouped for display. */
+function hexByteCount(hex: string): string {
+  const body = hex.trim().replace(/^0x/i, '');
+  return Math.floor(body.length / 2).toLocaleString('en-US');
 }
 
 function OptionalToContextBar({ addressInput, chain }: { addressInput: string; chain: ChainConfig }) {
@@ -286,6 +295,8 @@ export function CalldataInput({
   initialCalldata,
   chainId,
   onChainChange,
+  collapsed = false,
+  onExpand,
 }: CalldataInputProps) {
   const { offlineMode, setOfflineMode, skipEns, setSkipEns } = useChainUi();
   const currentChain = useMemo(() => getChain(chainId), [chainId]);
@@ -497,6 +508,31 @@ export function CalldataInput({
     }
   }, [optionalContractTo]);
 
+  if (collapsed && !currentlyLoading) {
+    const shown = txInfo ? txInfo.hash : calldata.trim();
+    return (
+      <div className="flex items-center gap-3 flex-wrap min-w-0">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs text-gray-500">
+            {txInfo ? 'Transaction' : 'Calldata'} on {currentChain.name}
+            {!txInfo && shown && ` · ${hexByteCount(shown)} bytes`}
+            {offlineMode && ' · offline'}
+          </p>
+          <p className="font-mono text-sm text-gray-300 truncate" title={shown}>
+            {shown || '—'}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onExpand}
+          className="shrink-0 px-3 py-1.5 rounded-lg border border-gray-700 text-gray-300 text-sm hover:border-gray-500 hover:text-gray-50 transition-colors"
+        >
+          Edit input
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex gap-1 mb-1 items-center flex-wrap">
@@ -513,7 +549,7 @@ export function CalldataInput({
           }}
           className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
             inputMode === 'calldata'
-              ? 'bg-gray-700 text-white'
+              ? 'bg-gray-700 text-gray-50'
               : 'text-gray-500 hover:text-gray-300'
           }`}
         >
@@ -530,7 +566,7 @@ export function CalldataInput({
           }}
           className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
             inputMode === 'txhash'
-              ? 'bg-gray-700 text-white'
+              ? 'bg-gray-700 text-gray-50'
               : 'text-gray-500 hover:text-gray-300'
           }`}
         >
@@ -581,14 +617,17 @@ export function CalldataInput({
             spellCheck={false}
             autoComplete="off"
           />
-          <p className="mt-1 text-xs text-gray-500">
+          {/* Keyboard hint only where there is a keyboard; the draft note is in the title. */}
+          <p
+            className="mt-1 text-xs text-gray-500 hidden sm:block"
+            title="Your draft is kept in this tab until you close it (a #calldata link still wins)."
+          >
             <kbd className="px-1 py-0.5 rounded bg-gray-800 border border-gray-700 font-mono text-[10px]">Enter</kbd>
             {' '}to decode ·{' '}
             <kbd className="px-1 py-0.5 rounded bg-gray-800 border border-gray-700 font-mono text-[10px]">Shift</kbd>
             +
             <kbd className="px-1 py-0.5 rounded bg-gray-800 border border-gray-700 font-mono text-[10px]">Enter</kbd>
-            {' '}for a new line · Draft saved in this tab until you close it (URL{' '}
-            <span className="font-mono text-gray-500">#</span> still wins when present).
+            {' '}for a new line
           </p>
           <div className="mt-3">
             <label htmlFor="optional-to-input" className="block text-sm font-medium text-gray-300 mb-1.5">
@@ -606,7 +645,7 @@ export function CalldataInput({
                 }}
                 onBlur={validateOptionalToOnBlur}
                 onKeyDown={handlePrimaryEnter}
-                placeholder="0x... (call target for proxy warnings & labels)"
+                placeholder="0x… call target"
                 className="min-w-0 flex-1 rounded-lg bg-gray-900 border border-gray-700 px-3 py-2 text-sm font-mono text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                 spellCheck={false}
                 autoComplete="off"
@@ -626,7 +665,7 @@ export function CalldataInput({
               </p>
             )}
             <p className="mt-1 text-xs text-gray-500">
-              Not required to decode. If set, used like a transaction <span className="font-mono text-gray-500">to</span> for known-contract labels and proxy notices.
+              The contract this calldata is sent to. Optional; it adds contract labels and proxy notices.
             </p>
           </div>
         </div>
@@ -673,7 +712,7 @@ export function CalldataInput({
           type="button"
           onClick={handleDecode}
           disabled={currentlyLoading || (inputMode === 'calldata' ? !calldata.trim() : !txHash.trim())}
-          className="px-5 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="px-5 py-2 rounded-lg bg-blue-600 text-gray-50 text-sm font-medium hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           {currentlyLoading ? (
             <span className="flex items-center gap-2">
@@ -718,13 +757,9 @@ export function CalldataInput({
           </label>
         )}
 
-        <span className="text-xs text-gray-500 hidden sm:inline">
-          {offlineMode
-            ? 'Using bundled ABIs only'
-            : skipEns
-              ? 'ENS lookups disabled'
-              : 'Querying signature databases'}
-        </span>
+        {offlineMode && (
+          <span className="text-xs text-gray-500">Bundled ABIs only, no network requests</span>
+        )}
       </div>
 
       {showAbi && (

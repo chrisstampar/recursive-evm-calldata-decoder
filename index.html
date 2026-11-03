@@ -17,8 +17,9 @@
     <!-- Relative og:image resolves against the shared URL; use absolute URLs in production for best crawlers. -->
     <meta property="og:image" content="/icon-512.png" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="theme-color" content="#030712" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#030712" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f9fafb" media="(prefers-color-scheme: light)" />
+    <meta name="color-scheme" content="dark light" />
     <link rel="preconnect" href="https://api.openchain.xyz" crossorigin />
     <link rel="preconnect" href="https://ethereum-rpc.publicnode.com" crossorigin />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />

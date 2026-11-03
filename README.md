@@ -20,15 +20,17 @@ A **client-side** web tool that recursively decodes Ethereum transaction calldat
 
 ## Features
 
+- **Plain-language summary** -- One line per step above the tree ("Permit2: let Uniswap Universal Router v2 spend 100.1 USDT", "Swap up to 100.1 USDT for 3,017 NAORIS via USDT → NAORIS (0.3% pool)"), each with a link to its node in the tree
 - **Recursive decoding** -- Multicalls, `aggregate`, `multiSend`, and nested `bytes` fields are expanded automatically into a navigable tree
 - **Router plans** -- Uniswap Universal Router commands and v4 actions (`V4_SWAP` → swap / settle / take), and Enso weiroll shortcuts (each step's target, function and call type) are spelled out instead of shown as opaque bytes
 - **Hidden-data checks** -- Bytes after the ABI arguments are shown and classified (ERC-8021 builder codes, Across integrator IDs, short frontend tags vs. long unexplained tails); non-canonical encodings are flagged
 - **Transaction hash lookup** -- Paste a tx hash instead of raw calldata; the tool fetches calldata from public Ethereum RPCs
 - **3-tier signature resolution** -- Bundled ABIs (instant) -> [openchain.xyz](https://openchain.xyz) -> [4byte.directory](https://www.4byte.directory) as fallback
 - **Token-aware formatting** -- When sibling parameters include **known token addresses**, adjacent `uint256` amounts use that token’s decimals and symbol (and, for configured stablecoins, an approximate USD peg line where applicable)
-- **Smart value interpretation** -- EIP-55 checksummed addresses with explorer links, known contract labels, timestamp detection, max-uint256 detection, zero address labeling, router sentinels (`MSG_SENDER`, `CONTRACT_BALANCE`, native-coin placeholders)
-- **Warnings** -- Unlimited approvals and permits (ERC-20, EIP-2612, DAI, Permit2 incl. Universal Router permits), Safe DELEGATECALLs, swaps with no slippage limit, large transfers, unverified tokens, malformed batches
+- **Smart value interpretation** -- The readable value leads (token amounts, dates, "no limit") with the raw number underneath; Uniswap v3 paths decode to tokens and pool fees; EIP-55 checksummed addresses with explorer links, known contract labels, timestamp detection, max-uint256 detection, zero address labeling, router sentinels (`MSG_SENDER`, `CONTRACT_BALANCE`, native-coin placeholders)
+- **Warnings** -- Unlimited approvals and permits (ERC-20, EIP-2612, DAI, Permit2 incl. Universal Router permits), Safe DELEGATECALLs, swaps with no slippage limit, large transfers, unverified tokens, malformed batches. Each warning links to the call it is about
 - **Confidence scoring** -- When multiple signatures match a selector, candidates are scored (an exact, canonical fit of every byte wins) and the best match is shown with alternatives available
+- **Light and dark themes** -- Follows the system setting, or pick one from the header
 - **Offline mode** -- Toggle to use only bundled ABIs with zero network requests
 - **Custom ABI support** -- Paste a contract ABI JSON for guaranteed-correct decoding with named parameters
 - **URL sharing** -- Decoded calldata is stored in the URL hash for easy sharing

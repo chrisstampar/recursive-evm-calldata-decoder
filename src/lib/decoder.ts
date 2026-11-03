@@ -835,6 +835,9 @@ async function processDecodedParams(
 
   await enrichParamsWithTokenContext(params, options, sig, depth);
   throwIfDecodeAborted(options);
+  await annotatePermit2Details(params, options);
+  await annotateUniswapV3Paths(params, sig, options);
+  throwIfDecodeAborted(options);
   enrichDestinationChainIdLabels(params);
   await annotateWeirollCommands(params, selector, sig, options);
   throwIfDecodeAborted(options);
@@ -1138,6 +1141,110 @@ function annotateRouterConstants(params: DecodedParam[], options: DecodeOptions)
     }
   };
   params.forEach(p => visit(p.value, p.name));
+}
+
+/** Permit2 `PermitDetails` / `AllowanceTransfer` details: `(address token, uint160 amount, uint48 expiration, uint48 nonce)`. */
+const PERMIT2_DETAILS_TYPES = ['address', 'uint160', 'uint48', 'uint48'];
+const UINT160_MAX = (1n << 160n) - 1n;
+
+/**
+ * Permit2 details tuples sit one level below the permit struct, out of reach of the generic tuple pass (which would
+ * also put the nonce in token units). Give `amount` the token's units, and say what the special values mean:
+ * `type(uint160).max` is unlimited and an `expiration` of 0 means the allowance only lasts for this block.
+ */
+async function annotatePermit2Details(params: DecodedParam[], options: DecodeOptions): Promise<void> {
+  const jobs: Promise<void>[] = [];
+  const visit = (v: DecodedValue): void => {
+    if (v.kind === 'array') {
+      v.elements.forEach(visit);
+      return;
+    }
+    if (v.kind !== 'tuple') return;
+    const f = v.fields;
+    if (f.length === 4 && f.every((x, i) => x.type.replace(/\s/g, '') === PERMIT2_DETAILS_TYPES[i])) {
+      jobs.push(annotateOnePermit2Details(f, options));
+      return;
+    }
+    f.forEach(x => visit(x.value));
+  };
+  params.forEach(p => visit(p.value));
+  await Promise.all(jobs);
+}
+
+async function annotateOnePermit2Details(f: DecodedParam[], options: DecodeOptions): Promise<void> {
+  const [tokenP, amountP, expirationP] = f;
+  const amount = amountP.value;
+  const expiration = expirationP.value;
+  if (expiration.kind === 'primitive' && expiration.raw === '0') {
+    expiration.interpretation = "0: the allowance expires at the end of this transaction's block";
+  }
+  if (amount.kind !== 'primitive') return;
+  const token = addressOf(tokenP.value);
+  const info = token ? await resolveTokenInfo(token, options) : undefined;
+  let n: bigint;
+  try {
+    n = BigInt(amount.raw);
+  } catch {
+    return;
+  }
+  if (n === UINT160_MAX) {
+    const sym = info ? (info.unverified ? `"${info.symbol}"` : info.symbol) : 'token';
+    amount.interpretation = `Unlimited ${sym} (type(uint160).max)`;
+    if (info) amount.tokenAmount = { symbol: info.symbol, decimals: info.decimals, ...(info.unverified ? { unverified: true } : {}) };
+    return;
+  }
+  if (info) applyTokenContextToUintPrimitive(amountP.type, amount, info, true);
+}
+
+/** Packed v3 path: 20-byte token, then (3-byte fee, 20-byte token) per hop. */
+const V3_PATH_HOP_BYTES = 23;
+const V3_PATH_MAX_HOPS = 8;
+
+/**
+ * Uniswap v3 swap paths (`path` bytes in Universal Router and SwapRouter swaps) as tokens and pool fees. Only `bytes`
+ * named `path` with an exact v3 length are read; exact-output swaps are marked because they encode output-first.
+ */
+async function annotateUniswapV3Paths(params: DecodedParam[], sig: FunctionSignature, options: DecodeOptions): Promise<void> {
+  const exactOut = /exact_?out/i.test(sig.name);
+  const jobs: Promise<void>[] = [];
+  const visit = (name: string, v: DecodedValue): void => {
+    if (v.kind === 'tuple') {
+      v.fields.forEach(x => visit(x.name, x.value));
+      return;
+    }
+    if (v.kind !== 'bytes' || v.decoded || !/^_?path$/i.test(name)) return;
+    const body = v.hex.slice(2).toLowerCase();
+    const byteLen = body.length / 2;
+    if (!/^[0-9a-f]*$/.test(body) || byteLen < 20 + V3_PATH_HOP_BYTES || (byteLen - 20) % V3_PATH_HOP_BYTES !== 0) return;
+    const hops = (byteLen - 20) / V3_PATH_HOP_BYTES;
+    if (hops > V3_PATH_MAX_HOPS) return;
+    const addrs: string[] = [];
+    const fees: number[] = [];
+    let at = 0;
+    for (let i = 0; i <= hops; i++) {
+      addrs.push(getAddress(`0x${body.slice(at, at + 40)}`));
+      at += 40;
+      if (i < hops) {
+        fees.push(parseInt(body.slice(at, at + 6), 16));
+        at += 6;
+      }
+    }
+    jobs.push(
+      (async () => {
+        const infos = await Promise.all(addrs.map(a => resolveRouterCurrency(a, options).catch(() => undefined)));
+        v.v3Path = {
+          tokens: addrs.map((address, i) => {
+            const info = infos[i];
+            return info ? { address, symbol: info.symbol, ...(info.unverified ? { unverified: true } : {}) } : { address };
+          }),
+          fees,
+          ...(exactOut ? { exactOut: true } : {}),
+        };
+      })(),
+    );
+  };
+  params.forEach(p => visit(p.name, p.value));
+  await Promise.all(jobs);
 }
 
 /** `uint` / `uint256` / … only (not `uint256[]` or tuples). */

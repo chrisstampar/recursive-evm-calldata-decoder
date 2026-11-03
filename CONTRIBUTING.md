@@ -54,6 +54,19 @@ Run them after editing `chains.ts` or `abiRegistry.ts`.
 FUZZ_RUNS=20000 npx vitest run --config config/vitest.config.ts src/lib/decoder.fuzz.test.ts
 ```
 
+## Light theme
+
+Components are written dark-first with Tailwind colour utilities. `src/theme-light.css` is generated: it mirrors each
+colour scale the app uses (50↔950, 100↔900, …). After upgrading Tailwind or using a new colour scale (add it to
+`HUES` in the script), regenerate it:
+
+```bash
+node scripts/gen-light-theme.mjs
+```
+
+Use solid shades for small text rather than opacity (`text-yellow-200`, not `text-yellow-300/80`): opacity costs
+contrast in the light theme.
+
 ## Style
 
 - Match existing **TypeScript strict** patterns and file layout under `src/`.

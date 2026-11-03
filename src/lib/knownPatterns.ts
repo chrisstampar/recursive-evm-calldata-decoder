@@ -66,6 +66,8 @@ export interface MulticallPattern {
   riskLevel?: PatternRiskLevel;
   /** Short explanation shown in warning banners (pair with `riskLevel`). */
   description?: string;
+  /** Banner title; defaults to "Sensitive pattern: {name}". */
+  warningTitle?: string;
 }
 
 /**
@@ -155,18 +157,22 @@ const PATTERNS: MulticallPattern[] = [
     selector: '0x3593564c',
     name: 'execute',
     calldataIndices: [{ kind: 'array-direct', paramIndex: 1 }],
-    riskLevel: 'medium',
+    // Every command is decoded, and permits / missing slippage limits get their own warnings, so this is a note.
+    riskLevel: 'low',
+    warningTitle: 'Universal Router plan',
     description:
-      'Universal Router command plan: each command (swap, permit, transfer, sweep…) is decoded below. Check every recipient, amount and PERMIT2 permit; the router acts with whatever allowances you have given it.',
+      'Each command the router will run is decoded below. It acts with the allowances you have given it, so check every recipient, amount and permit.',
   },
   // execute(bytes,bytes[])
   {
     selector: '0x24856bc3',
     name: 'execute',
     calldataIndices: [{ kind: 'array-direct', paramIndex: 1 }],
-    riskLevel: 'medium',
+    // Every command is decoded, and permits / missing slippage limits get their own warnings, so this is a note.
+    riskLevel: 'low',
+    warningTitle: 'Universal Router plan',
     description:
-      'Universal Router command plan: each command (swap, permit, transfer, sweep…) is decoded below. Check every recipient, amount and PERMIT2 permit; the router acts with whatever allowances you have given it.',
+      'Each command the router will run is decoded below. It acts with the allowances you have given it, so check every recipient, amount and permit.',
   },
   // swapCompact — selector is `swapCompact()` on 4byte; real txs often append a non-ABI packed blob (decoder path in `decoder.ts`).
   {

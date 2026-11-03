@@ -132,7 +132,7 @@ export function analyzeWarnings(
   const seenPatternSelectors = new Set<string>();
   /** Same inner `bytes` selector often decodes ambiguously many times — warn once per (selector, function name). */
   const seenAmbiguousDecodes = new Set<string>();
-  walkCall(call, warnings, chainId, seenPatternSelectors, seenAmbiguousDecodes);
+  walkCall(call, warnings, chainId, seenPatternSelectors, seenAmbiguousDecodes, { next: 0 });
 
   // Router plans often enforce the minimum in a later step instead of the swap itself.
   if (hasLaterSlippageGuard(call)) {
@@ -190,7 +190,7 @@ function checkKnownPatternRisk(call: DecodedCall, warnings: TxWarning[], seenSel
   seenSelectors.add(key);
   warnings.push({
     severity: patternRiskToSeverity(pattern.riskLevel),
-    title: `Sensitive pattern: ${pattern.name}`,
+    title: pattern.warningTitle ?? `Sensitive pattern: ${pattern.name}`,
     context: `${warningCallFrameContext(call)} Why: selector ${call.selector.toLowerCase()} is on our curated list (“${pattern.name}”).`,
     message: pattern.description,
   });
@@ -245,12 +245,17 @@ function walkCall(
   chainId: number,
   seenPatternSelectors: Set<string>,
   seenAmbiguousDecodes: Set<string>,
+  /** Pre-order call counter; matches `listDecodedCalls` so each warning can name its tree node. */
+  order: { next: number },
 ) {
+  const callIndex = order.next++;
+  const before = warnings.length;
   checkKnownPatternRisk(call, warnings, seenPatternSelectors);
   checkCallForWarnings(call, warnings, chainId, seenAmbiguousDecodes);
+  for (let i = before; i < warnings.length; i++) warnings[i].callIndex ??= callIndex;
 
   for (const param of call.params) {
-    walkValue(param.value, warnings, chainId, seenPatternSelectors, seenAmbiguousDecodes);
+    walkValue(param.value, warnings, chainId, seenPatternSelectors, seenAmbiguousDecodes, order);
   }
 }
 
@@ -260,16 +265,17 @@ function walkValue(
   chainId: number,
   seenPatternSelectors: Set<string>,
   seenAmbiguousDecodes: Set<string>,
+  order: { next: number },
 ) {
   if (value.kind === 'bytes' && value.decoded) {
-    walkCall(value.decoded, warnings, chainId, seenPatternSelectors, seenAmbiguousDecodes);
+    walkCall(value.decoded, warnings, chainId, seenPatternSelectors, seenAmbiguousDecodes, order);
   } else if (value.kind === 'array') {
     for (const el of value.elements) {
-      walkValue(el, warnings, chainId, seenPatternSelectors, seenAmbiguousDecodes);
+      walkValue(el, warnings, chainId, seenPatternSelectors, seenAmbiguousDecodes, order);
     }
   } else if (value.kind === 'tuple') {
     for (const field of value.fields) {
-      walkValue(field.value, warnings, chainId, seenPatternSelectors, seenAmbiguousDecodes);
+      walkValue(field.value, warnings, chainId, seenPatternSelectors, seenAmbiguousDecodes, order);
     }
   }
 }

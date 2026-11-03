@@ -32,6 +32,12 @@ export interface TreeExpansionContextValue {
   expandAll: () => void;
   /** Same re-bump semantics as {@link TreeExpansionContextValue.expandAll}. */
   collapseAll: () => void;
+  /**
+   * Nodes (calls, arrays, tuples) to open so one call comes into view; see `pathToCall`. Nodes check it on mount
+   * too, since deeper levels only mount once their parent opens.
+   */
+  revealPath: ReadonlySet<object> | null;
+  reveal: (path: readonly object[]) => void;
 }
 
 const TreeExpansionContext = createContext<TreeExpansionContextValue | null>(null);
@@ -43,6 +49,7 @@ function bumpGeneration(prev: number): number {
 export function TreeExpansionProvider({ children }: { children: ReactNode }) {
   const [generation, setGeneration] = useState(0);
   const [lastBulk, setLastBulk] = useState<TreeBulkExpansion | null>(null);
+  const [revealPath, setRevealPath] = useState<ReadonlySet<object> | null>(null);
 
   const expandAll = useCallback(() => {
     setLastBulk('expand-all');
@@ -54,9 +61,16 @@ export function TreeExpansionProvider({ children }: { children: ReactNode }) {
     setGeneration(bumpGeneration);
   }, []);
 
+  const reveal = useCallback((path: readonly object[]) => {
+    // Clear the bulk intent, or nodes mounting along the path would re-apply an earlier collapse-all.
+    setLastBulk(null);
+    setRevealPath(new Set(path));
+    setGeneration(bumpGeneration);
+  }, []);
+
   const value = useMemo(
-    () => ({ generation, lastBulk, expandAll, collapseAll }),
-    [generation, lastBulk, expandAll, collapseAll],
+    () => ({ generation, lastBulk, expandAll, collapseAll, revealPath, reveal }),
+    [generation, lastBulk, expandAll, collapseAll, revealPath, reveal],
   );
 
   return <TreeExpansionContext.Provider value={value}>{children}</TreeExpansionContext.Provider>;

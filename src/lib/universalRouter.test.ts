@@ -68,6 +68,23 @@ describe('Universal Router execute (real transactions)', () => {
     expect(titles.some(t => t === 'Permit2 allowance' || t === 'Unlimited token approval')).toBe(true);
   });
 
+  it('gives Permit2 details amounts token units, leaves the nonce raw and explains expiration 0', async () => {
+    const call = await decode(UR_PERMIT_V3_EXACT_OUT_MAINNET);
+    const permit = steps(call.params[1].value)[0];
+    const single = permit.params[0].value;
+    if (single.kind !== 'tuple') throw new Error('tuple');
+    const details = single.fields[0].value;
+    if (details.kind !== 'tuple') throw new Error('tuple');
+    const [, amount, expiration, nonce] = details.fields;
+    expect(prim(amount.value).interpretation).toMatch(/^100\.108212 USDT/);
+    expect(prim(expiration.value).interpretation).toMatch(/end of this transaction's block/);
+    expect(prim(nonce.value).tokenAmount).toBeUndefined();
+    // The swap's packed path reads as tokens and a fee, marked output-first (exact-out).
+    const swap = steps(call.params[1].value)[1];
+    const path = swap.params[3].value;
+    expect(path.kind === 'bytes' && path.v3Path).toMatchObject({ fees: [3000], exactOut: true });
+  });
+
   it('flags swaps with a zero minimum output', async () => {
     const call = await decode(UR_V4_SWAP_ETH_IN_MAINNET);
     expect(analyzeWarnings(call, undefined, { chainId: 1 }).map(w => w.title)).toContain('No slippage limit');

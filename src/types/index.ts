@@ -81,11 +81,22 @@ export type DecodedValue =
       kind: 'bytes';
       hex: string;
       decoded?: DecodedCall;
+      /** Packed Uniswap v3 swap path (`token ‖ fee ‖ token …`), when this `bytes` value is one. */
+      v3Path?: UniswapV3Path;
       /** After decode enrichment: 32-byte word scan (may be `[]`); omitted until enrichment runs. */
       wordAlignedAddresses?: WordAlignedAddressHit[];
     }
   | { kind: 'array'; elementType: string; elements: DecodedValue[] }
   | { kind: 'tuple'; fields: DecodedParam[] };
+
+/** A decoded Uniswap v3 path, in the order it is encoded (exact-output swaps encode it output-first). */
+export interface UniswapV3Path {
+  tokens: { address: string; symbol?: string; unverified?: boolean }[];
+  /** Pool fee per hop in hundredths of a basis point (3000 = 0.3%). `fees.length === tokens.length - 1`. */
+  fees: number[];
+  /** Encoded output-first (exact-output swap): the trade runs from the last token to the first. */
+  exactOut?: boolean;
+}
 
 export type DecodeConfidence = 'exact' | 'high' | 'ambiguous' | 'failed';
 
@@ -122,6 +133,8 @@ export interface TxWarning {
   message: string;
   /** Where/why this alert applies (call frame, tx field, decoder limit). Shown under the title in the UI. */
   context?: string;
+  /** Call this alert is about, as its position in `listDecodedCalls(root)` (lets the UI jump to the tree node). */
+  callIndex?: number;
 }
 
 export type DecodeResult =

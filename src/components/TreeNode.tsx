@@ -5,7 +5,11 @@ import type {
   DecodedCall,
   DecodeConfidence,
   SignatureSource,
+  UniswapV3Path,
 } from '../types/index.ts';
+import { useCallIndex } from '../context/CallIndexContext.ts';
+import { callNodeDomId } from '../lib/callTree.ts';
+import { splitInterpretation } from '../lib/valueFormatter.ts';
 import { useChainId, useChainUi } from '../context/ChainContext.ts';
 import { classifyTrailingData } from '../lib/trailingData.ts';
 import { ExplorerAddressLink } from './ExplorerAddressLink.tsx';
@@ -450,14 +454,17 @@ function TypeBadge({ type }: TypeBadgeProps) {
     }
   }
 
-  const displayType =
-    type.length > TYPE_BADGE_MAX_LEN
+  // A tuple's field list is unreadable as a chip (and its fields are listed below anyway): name the shape instead.
+  const tupleArraySuffix = type.startsWith('(') ? /(\[\d*\])*$/.exec(type)?.[0] ?? '' : '';
+  const displayType = type.startsWith('(')
+    ? `struct${tupleArraySuffix}`
+    : type.length > TYPE_BADGE_MAX_LEN
       ? `${type.slice(0, TYPE_BADGE_BODY_LEN)}${COPY_PREVIEW_ELLIPSIS}`
       : type;
 
   return (
     <span
-      className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-mono border shrink-0 max-w-[200px] truncate ${colorClass}`}
+      className={`inline-block px-1 py-px rounded text-[10px] font-mono border shrink-0 max-w-[200px] truncate opacity-80 ${colorClass}`}
       title={type}
     >
       {displayType}
@@ -485,21 +492,90 @@ function SourceBadge({ source }: SourceBadgeProps) {
 
 // --- Tree: bottom-up (`function` hoisting allows `ValueDisplay` ↔ `DecodedCallNode`) ---
 
-function useExpandableNodeState(getInitial: () => boolean): [boolean, Dispatch<SetStateAction<boolean>>] {
+/** `node` is the call or value this toggle opens; it is opened when it lies on a "Show in tree" reveal path. */
+function useExpandableNodeState(
+  getInitial: () => boolean,
+  node?: object,
+): [boolean, Dispatch<SetStateAction<boolean>>] {
   const treeExp = useTreeExpansionOptional();
-  const [expanded, setExpanded] = useState(getInitial);
+  const onRevealPath = node != null && treeExp?.revealPath?.has(node) === true;
+  const [expanded, setExpanded] = useState(() => onRevealPath || getInitial());
 
   useEffect(() => {
-    if (!treeExp?.lastBulk) return;
-    const intent = treeExp.lastBulk;
+    const intent = treeExp?.lastBulk;
+    if (!intent && !onRevealPath) return;
     const id = requestAnimationFrame(() => {
-      if (intent === 'expand-all') setExpanded(true);
-      if (intent === 'collapse-all') setExpanded(false);
+      if (onRevealPath || intent === 'expand-all') setExpanded(true);
+      else if (intent === 'collapse-all') setExpanded(false);
     });
     return () => cancelAnimationFrame(id);
-  }, [treeExp?.generation, treeExp?.lastBulk]);
+  }, [treeExp?.generation, treeExp?.lastBulk, onRevealPath]);
 
   return [expanded, setExpanded];
+}
+
+/**
+ * A number with its reading: the reading leads ("100.1 USDT"), its caveat follows in small type, and the raw value
+ * sits underneath for checking. Unverified-token caveats are tinted so they are not skimmed past.
+ */
+function PrimitiveReading({ value }: { value: Extract<DecodedValue, { kind: 'primitive' }> }) {
+  if (!value.interpretation) {
+    return (
+      <div className="min-w-0">
+        <span className="font-mono text-sm text-gray-200 break-all">{value.display}</span>
+        <CopyMenu raw={value.raw} display={value.display} interpretation={value.interpretation} />
+      </div>
+    );
+  }
+  const { headline, note } = splitInterpretation(value.interpretation);
+  const noteClass = value.tokenAmount?.unverified || value.tokenAmount?.guessed ? 'text-amber-300' : 'text-gray-500';
+  return (
+    <div className="min-w-0">
+      <div className="min-w-0">
+        <span className="text-sm text-gray-100 break-words">{headline}</span>
+        {note && <span className={`ml-2 text-xs ${noteClass} break-words`}>{note}</span>}
+        <CopyMenu raw={value.raw} display={value.display} interpretation={value.interpretation} />
+      </div>
+      <div className="font-mono text-xs text-gray-500 break-all" title="Raw value">
+        {value.display}
+      </div>
+    </div>
+  );
+}
+
+/** Fee tier in hundredths of a basis point → "0.3%". */
+function formatV3Fee(fee: number): string {
+  return `${Number((fee / 10_000).toFixed(4))}%`;
+}
+
+/** A packed Uniswap v3 path in trade order: `USDT → 0.3% → WETH`. */
+function V3PathDisplay({ path }: { path: UniswapV3Path }) {
+  const chainId = useChainId();
+  const tokens = path.exactOut ? [...path.tokens].reverse() : path.tokens;
+  const fees = path.exactOut ? [...path.fees].reverse() : path.fees;
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-sm">
+      {tokens.map((t, i) => (
+        <span key={`${t.address}-${i}`} className="inline-flex items-baseline gap-1.5">
+          <a
+            href={`${getExplorerUrl(chainId)}/address/${t.address}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-purple-300 hover:text-purple-200 hover:underline"
+            title={t.unverified ? `${t.address} · symbol set by the contract itself` : t.address}
+          >
+            {t.symbol ? (t.unverified ? `"${t.symbol}"` : t.symbol) : `${t.address.slice(0, 6)}…${t.address.slice(-4)}`}
+          </a>
+          {i < fees.length && (
+            <span className="text-xs text-gray-500" title="Pool fee tier">
+              → {formatV3Fee(fees[i])} →
+            </span>
+          )}
+        </span>
+      ))}
+      {path.exactOut && <span className="text-xs text-gray-500">(encoded output-first)</span>}
+    </div>
+  );
 }
 
 function ValueDisplay({
@@ -533,7 +609,7 @@ function ValueDisplay({
       });
     }
     return false;
-  });
+  }, value);
 
   const arrayChildInsideHop =
     value.kind === 'array' && isCurveSwapParamsOuterMatrix(declaringParam, value.elementType);
@@ -549,13 +625,7 @@ function ValueDisplay({
       const primary = emb.checksummed;
       return (
         <div className="min-w-0 space-y-1">
-          <div className="min-w-0">
-            <span className="font-mono text-sm text-gray-200 break-all">{value.display}</span>
-            {value.interpretation && (
-              <span className="ml-2 text-xs text-gray-500 italic break-all">{value.interpretation}</span>
-            )}
-            <CopyMenu raw={value.raw} display={value.display} interpretation={value.interpretation} />
-          </div>
+          <PrimitiveReading value={value} />
           <div className="min-w-0 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <a
               href={href}
@@ -588,15 +658,7 @@ function ValueDisplay({
         </div>
       );
     }
-    return (
-      <div className="min-w-0">
-        <span className="font-mono text-sm text-gray-200 break-all">{value.display}</span>
-        {value.interpretation && (
-          <span className="ml-2 text-xs text-gray-500 italic break-all">{value.interpretation}</span>
-        )}
-        <CopyMenu raw={value.raw} display={value.display} interpretation={value.interpretation} />
-      </div>
-    );
+    return <PrimitiveReading value={value} />;
   }
 
   if (value.kind === 'address') {
@@ -680,6 +742,18 @@ function ValueDisplay({
       byteLen > BYTES_INLINE_MAX_BYTES
         ? `${value.hex.slice(0, BYTES_INLINE_HEAD_CHARS)}${COPY_PREVIEW_ELLIPSIS}${value.hex.slice(-BYTES_INLINE_TAIL_CHARS)}`
         : value.hex;
+    if (value.v3Path) {
+      return (
+        <div className="min-w-0">
+          <V3PathDisplay path={value.v3Path} />
+          <div className="min-w-0">
+            <span className="font-mono text-xs text-gray-500 break-all">{display}</span>
+            <span className="ml-2 text-xs text-gray-500">{byteLen} bytes</span>
+            <CopyButton text={value.hex} />
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="min-w-0">
         <span className="font-mono text-sm text-orange-300 break-all">{display}</span>
@@ -716,7 +790,7 @@ function ValueDisplay({
           )}
         </div>
         {expanded && (
-          <div className="mt-1 space-y-1 border-l-2 border-gray-800 pl-3">
+          <div className="mt-1 space-y-1 border-l-2 border-gray-800 pl-2 sm:pl-3">
             {value.elements.map((elem, i) => (
               <div key={arrayElementRowKey(value.elementType, elem, i, depth)}>
                 <span className="text-xs text-gray-500 font-mono">[{i}]</span>
@@ -747,10 +821,10 @@ function ValueDisplay({
           onClick={() => setExpanded(!expanded)}
           className="text-xs text-gray-500 hover:text-gray-300 font-mono"
         >
-          {expanded ? '▼' : '▶'} {'{'}tuple{'}'}
+          {expanded ? '▼' : '▶'} {value.fields.length} field{value.fields.length === 1 ? '' : 's'}
         </button>
         {expanded && (
-          <div className="mt-1 space-y-2 border-l-2 border-gray-800 pl-3">
+          <div className="mt-1 space-y-2 border-l-2 border-gray-800 pl-2 sm:pl-3">
             {value.fields.map((field, i) => (
               <ParamRow
                 key={tupleFieldRowKey(field, i, depth)}
@@ -768,6 +842,67 @@ function ValueDisplay({
   return null;
 }
 
+/**
+ * A struct argument: its name is the toggle and its fields sit directly under it, rather than a separate
+ * "{tuple}" row adding another level of indentation.
+ */
+function TupleParamRow({
+  param,
+  depth,
+  autoExpandMaxDepth = DEFAULT_AUTO_EXPAND_DEPTH,
+}: ParamRowProps) {
+  const value = param.value as Extract<DecodedValue, { kind: 'tuple' }>;
+  const [expanded, setExpanded] = useExpandableNodeState(
+    () =>
+      computeInitialExpanded({
+        kind: 'tuple',
+        depth,
+        autoExpandMaxDepth,
+        childCount: value.fields.length,
+      }),
+    value,
+  );
+  const count = value.fields.length;
+  return (
+    <div className="min-w-0">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-baseline gap-1.5 text-left min-w-0"
+        title={param.type}
+      >
+        <span className="text-xs text-gray-500 font-mono w-3 shrink-0" aria-hidden>
+          {expanded ? '▼' : '▶'}
+        </span>
+        <span className="text-sm font-medium text-gray-400">{param.name}</span>
+        {!expanded && (
+          <span className="text-xs text-gray-500">
+            {count} field{count === 1 ? '' : 's'}
+          </span>
+        )}
+      </button>
+      {param.fieldHint ? (
+        <p className="text-[11px] text-gray-500 leading-snug max-w-3xl border-l border-gray-700/70 pl-2 ml-4">
+          {param.fieldHint}
+        </p>
+      ) : null}
+      {expanded && (
+        <div className="mt-1 ml-1.5 space-y-2 border-l border-gray-800 pl-2 sm:pl-3">
+          {value.fields.map((field, i) => (
+            <ParamRow
+              key={tupleFieldRowKey(field, i, depth)}
+              param={field}
+              depth={depth + 1}
+              autoExpandMaxDepth={autoExpandMaxDepth}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ParamRow({
   param,
   depth,
@@ -775,8 +910,11 @@ function ParamRow({
 }: ParamRowProps) {
   const [showRaw, setShowRaw] = useState(false);
 
+  if (param.value.kind === 'tuple') {
+    return <TupleParamRow param={param} depth={depth} autoExpandMaxDepth={autoExpandMaxDepth} />;
+  }
+
   const isComplex =
-    param.value.kind === 'tuple' ||
     param.value.kind === 'array' ||
     (param.value.kind === 'bytes' && param.value.decoded != null);
 
@@ -790,16 +928,17 @@ function ParamRow({
   };
 
   return (
-    <div className="group min-w-0">
+    <div className="min-w-0">
       <div className="flex flex-col gap-0.5 min-w-0">
-        <div className="flex items-baseline gap-1.5 flex-wrap min-w-0">
+        {/* Hover group on the header line only: rows nest, and a row-wide group would reveal every descendant's toggle. */}
+        <div className="group/param flex items-baseline gap-1.5 flex-wrap min-w-0">
           <span className="text-sm font-medium text-gray-400 shrink-0">{param.name}</span>
           <TypeBadge type={param.type} />
           {param.rawHex && (
             <button
               type="button"
               onClick={() => setShowRaw(!showRaw)}
-              className="text-[10px] text-gray-500 hover:text-gray-400 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+              className="text-[10px] text-gray-500 hover:text-gray-400 shrink-0 opacity-0 group-hover/param:opacity-100 focus-visible:opacity-100 transition-opacity"
               title="Show or hide the 32-byte ABI-encoded hex word for this argument"
             >
               {showRaw ? 'hide hex' : 'hex'}
@@ -834,18 +973,24 @@ export function DecodedCallNode({
   call,
   autoExpandMaxDepth = DEFAULT_AUTO_EXPAND_DEPTH,
 }: DecodedCallNodeProps) {
-  const [expanded, setExpanded] = useExpandableNodeState(() =>
-    computeInitialExpanded({
-      kind: 'call',
-      depth: call.depth,
-      autoExpandMaxDepth,
-      childCount: call.params.length,
-    }),
+  const [expanded, setExpanded] = useExpandableNodeState(
+    () =>
+      computeInitialExpanded({
+        kind: 'call',
+        depth: call.depth,
+        autoExpandMaxDepth,
+        childCount: call.params.length,
+      }),
+    call,
   );
   const [showAlts, setShowAlts] = useState(false);
+  const callIndex = useCallIndex(call);
 
   return (
-    <div className={`rounded-lg border min-w-0 ${call.depth === 0 ? 'border-gray-700 bg-gray-900/50' : 'border-gray-800 bg-gray-900/30'}`}>
+    <div
+      id={callIndex === undefined ? undefined : callNodeDomId(callIndex)}
+      className={`call-node scroll-mt-4 rounded-lg border min-w-0 ${call.depth === 0 ? 'border-gray-700 bg-gray-900/50' : 'border-gray-800 bg-gray-900/30'}`}
+    >
       <div
         className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-gray-800/50 transition-colors flex-wrap min-w-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 rounded-t-lg"
         role="button"
@@ -917,7 +1062,7 @@ export function DecodedCallNode({
       )}
 
       {expanded && (
-        <div className="px-3 py-2 border-t border-gray-800/50 space-y-2 min-w-0">
+        <div className="px-2 sm:px-3 py-2 border-t border-gray-800/50 space-y-2 min-w-0">
           <div className="text-xs font-mono text-gray-500 break-all">
             {call.signature.textSignature}
           </div>

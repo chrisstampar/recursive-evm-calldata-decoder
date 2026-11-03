@@ -2,7 +2,9 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { formatEther } from 'ethers';
 import type { DecodeResult } from '../types/index.ts';
 import { useChainId, useOfflineMode } from '../context/ChainContext.ts';
-import { TreeExpansionProvider } from '../context/TreeExpansionContext.tsx';
+import { TreeExpansionProvider, useTreeExpansionOptional } from '../context/TreeExpansionContext.tsx';
+import { CallIndexContext } from '../context/CallIndexContext.ts';
+import { listDecodedCalls } from '../lib/callTree.ts';
 import { getKnownPattern } from '../lib/knownPatterns.ts';
 import { getChain, type ChainConfig } from '../lib/chains.ts';
 import { getContractName } from '../lib/abiRegistry.ts';
@@ -282,6 +284,16 @@ export function DecodeTree({ result, autoExpandMaxDepth, shareUrl }: DecodeTreeP
   const isError = result.status === 'error';
   const isNativeTransfer = result.status === 'native_transfer';
 
+  /** Provider from the page (shared with the summary and warnings for "Show in tree"); else the tree brings its own. */
+  const outerTreeExpansion = useTreeExpansionOptional();
+  const callIndexMap = useMemo(
+    () =>
+      result.status === 'success' || result.status === 'partial'
+        ? new Map(listDecodedCalls(result.call).map((c, i) => [c, i] as const))
+        : null,
+    [result],
+  );
+
   const decodeTreeSessionKey = useMemo(() => {
     if (result.status !== 'success' && result.status !== 'partial') return 'none';
     const raw = result.call.rawCalldata ?? '';
@@ -430,15 +442,20 @@ export function DecodeTree({ result, autoExpandMaxDepth, shareUrl }: DecodeTreeP
               {serializedJson}
             </pre>
           ) : (
-            <TreeExpansionProvider key={decodeTreeSessionKey}>
-              <div className="flex justify-end mb-1 min-h-[1.5rem]">
-                <TreeExpandToolbar />
-              </div>
-              {/* Deep `pl-3` nesting can overflow narrow viewports; allow horizontal scroll without clipping focus rings */}
-              <div className="min-w-0 overflow-x-auto">
-                <DecodedCallNode call={result.call} autoExpandMaxDepth={autoExpandMaxDepth} />
-              </div>
-            </TreeExpansionProvider>
+            (() => {
+              const tree = (
+                <CallIndexContext.Provider value={callIndexMap}>
+                  <div className="flex justify-end mb-1 min-h-[1.5rem]">
+                    <TreeExpandToolbar />
+                  </div>
+                  {/* Deep `pl-3` nesting can overflow narrow viewports; allow horizontal scroll without clipping focus rings */}
+                  <div className="min-w-0 overflow-x-auto">
+                    <DecodedCallNode call={result.call} autoExpandMaxDepth={autoExpandMaxDepth} />
+                  </div>
+                </CallIndexContext.Provider>
+              );
+              return outerTreeExpansion ? tree : <TreeExpansionProvider key={decodeTreeSessionKey}>{tree}</TreeExpansionProvider>;
+            })()
           )}
         </>
       )}
