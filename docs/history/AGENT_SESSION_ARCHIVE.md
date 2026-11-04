@@ -891,3 +891,18 @@ _`_archive/AGENT_SESSION_ARCHIVE.2026-11-02.md`._
   ASCII-only signature names; Safe DELEGATECALL / permit / Permit2 warnings; trailing-bytes + non-canonical
   detection; `?chain=` in share links; full address primary, ENS secondary; framing refused.
 - Untracked `.claude/launch.json` (dev server config for the preview pane).
+
+### 2026-11-03 — Overnight review: real-tx corpus, registry, protocols, fuzz, a11y (`92a7218`)
+
+- Corpus: 2,585 contract calls from mainnet + Base (+ 250 blocks of 1inch / CoW / Pendle / Curve / Enso).
+  Findings fixed: Universal Router inputs were decoded as calldata (junk on every UR tx) → real command +
+  v4 action decoding (`universalRouter.ts`); Enso shortcuts are weiroll (commands decoded); 1inch v6 amounts
+  were mislabelled; `uint256[]` became a comma string and crashed CoW decodes; junk zero-arg "nested calls";
+  trailing-tag noise (now classified, `trailingData.ts`); padded-address scan showed offsets as addresses.
+- Registry/RPC: dead RPCs removed (llamarpc 525, polygon-rpc 401, 1rpc OP/Arb no CORS); stale symbols
+  (FLUID, fxSP, USDT0 on Arb/Polygon); two empty Superform labels dropped. New live integration tests.
+- Fuzz (`decoder.fuzz.test.ts`, fast-check): shared-offset ABI bomb hung the decoder → ethers inflation cap 16×
+  + 3,000-frame budget per decode. 20k-run deep pass clean.
+- UI: keyboard-operable call headers, aria-expanded, severity text on warnings, AA contrast (gray-500 lifted),
+  reduced motion, labelled copy buttons. New warning: "No slippage limit".
+- Details: "Part 2" in `AUDIT-2026-11-02.md`.
