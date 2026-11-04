@@ -109,4 +109,60 @@ describe('Universal Router execute (real transactions)', () => {
     expect(take0.signature.name).toBe('TAKE_ALL');
     expect(prim(take0.params[1].value).interpretation).toMatch(/^300 USDC/);
   });
+
+  it('gives every Universal Router and v4 step amount its token units', async () => {
+    const c = AbiCoder.defaultAbiCoder();
+    const ZERO = '0x0000000000000000000000000000000000000000';
+    const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+    const ME = '0x00000000000000000000000000000000000000aa';
+    const usdc = 1_500_000n; // 1.5 USDC
+    const eth = 15n * 10n ** 17n; // 1.5 ETH
+    const v4 = c.encode(
+      ['bytes', 'bytes[]'],
+      [
+        '0x0b0c0e0f0b0f',
+        [
+          c.encode(['address', 'uint256', 'bool'], [USDC, usdc, true]), // SETTLE
+          c.encode(['address', 'uint256'], [USDC, usdc]), // SETTLE_ALL
+          c.encode(['address', 'address', 'uint256'], [USDC, ME, usdc]), // TAKE
+          c.encode(['address', 'uint256'], [USDC, usdc]), // TAKE_ALL
+          c.encode(['address', 'uint256', 'bool'], [ZERO, eth, true]), // SETTLE, native
+          c.encode(['address', 'uint256'], [ZERO, eth]), // TAKE_ALL, native
+        ],
+      ],
+    );
+    const ur = new Interface(['function execute(bytes commands,bytes[] inputs,uint256 deadline)']);
+    const hex = ur.encodeFunctionData('execute', [
+      '0x0204050e0d0b0c10',
+      [
+        c.encode(['address', 'address', 'uint160'], [USDC, ME, usdc]), // PERMIT2_TRANSFER_FROM
+        c.encode(['address', 'address', 'uint256'], [USDC, ME, usdc]), // SWEEP
+        c.encode(['address', 'address', 'uint256'], [USDC, ME, usdc]), // TRANSFER
+        c.encode(['address', 'address', 'uint256'], [ME, USDC, usdc]), // BALANCE_CHECK_ERC20
+        c.encode(['(address,address,uint160,address)[]'], [[[ME, ME, usdc, USDC]]]), // PERMIT2_TRANSFER_FROM_BATCH
+        c.encode(['address', 'uint256'], [ME, eth]), // WRAP_ETH
+        c.encode(['address', 'uint256'], [ME, eth]), // UNWRAP_WETH
+        v4,
+      ],
+      0,
+    ]);
+    const call = await decode(hex);
+    const amounts: [string, string | undefined][] = [];
+    const visit = (step: DecodedCall) => {
+      const walk = (name: string, v: DecodedValue) => {
+        if (v.kind === 'tuple') v.fields.forEach(f => walk(f.name, f.value));
+        else if (v.kind === 'array') v.elements.forEach(e => walk(name, e));
+        else if (v.kind === 'bytes' && v.decoded) visit(v.decoded);
+        else if (v.kind === 'primitive' && /^(amount|value|minBalance|maxAmount|minAmount|amountMin)$/.test(name)) {
+          amounts.push([`${step.signature.name}.${name}`, v.interpretation]);
+        }
+      };
+      step.params.forEach(p => walk(p.name, p.value));
+    };
+    steps(call.params[1].value).forEach(visit);
+    expect(amounts).toHaveLength(13);
+    for (const [where, interpretation] of amounts) {
+      expect(interpretation, where).toMatch(/^1\.5 (USDC|ETH)\b/);
+    }
+  });
 });
