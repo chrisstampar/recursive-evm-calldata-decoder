@@ -872,3 +872,22 @@ _`_archive/AGENT_SESSION_ARCHIVE.2026-11-02.md`._
   Node 20 deprecation warning) pushed to `rad` and `origin`; CI green. GitHub mirror is caught up.
 - If off-topic entries come back, the source is Cursor's handoff hook
   (`selfhosted/scripts/cursor-memory/handoff.ts`), which writes every chat into the open workspace's file.
+
+### 2026-11-02 — Full audit (security + decoding)
+
+- Report: `AUDIT-2026-11-02.md` (gitignored via `AUDIT-*.md`; describes live spoofing paths — keep local
+  until fixed). 5 High, 7 Medium, 10 Low; most High/Medium confirmed with probe tests.
+- Highs: wrong-token amount labels (recipient used as token), on-chain symbols trusted like registry,
+  Unicode/invisible chars in remote function names, Safe DELEGATECALL not flagged, user ABI with structs fails.
+- Suggested fix order in the report. Nothing fixed yet; `.gitignore` line uncommitted.
+
+### 2026-11-02 — All audit findings fixed (`431f1d1` build/deps/CI, `e189a00` fixes)
+
+- Every H/M/L item in `AUDIT-2026-11-02.md` fixed except a dev-only ESLint `minimatch` advisory (no upstream fix).
+  Resolution table at the top of the audit file.
+- New: `src/lib/txIntegrity.ts` (re-hash fetched txs), `src/lib/auditRegressions.test.ts`, `src/lib/csp.test.ts`;
+  `ChainContext.tsx` → `.ts`; Vitest 4.1.12. 273 tests + integration green; lint/types/build clean.
+- Key behaviour changes: ERC-20 amounts use the call target; unverified on-chain tokens quoted, no USD peg;
+  ASCII-only signature names; Safe DELEGATECALL / permit / Permit2 warnings; trailing-bytes + non-canonical
+  detection; `?chain=` in share links; full address primary, ENS secondary; framing refused.
+- Untracked `.claude/launch.json` (dev server config for the preview pane).
