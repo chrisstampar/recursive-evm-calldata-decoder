@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Interface } from 'ethers';
+import { AbiCoder, Interface } from 'ethers';
 
 import { decodeCalldata } from './decoder.ts';
 import { analyzeWarnings } from './warningAnalyzer.ts';
@@ -54,6 +54,28 @@ describe('summarizeTransaction', () => {
       [1, expect.stringMatching(/^Swap 0\.0297\d* ETH for any amount \(no minimum\)$/)],
       [1, expect.stringMatching(/^Pay up to 0\.0297\d* ETH$/)],
       [1, expect.stringMatching(/^Receive all 0x2a07\w+ owed \(no minimum\)$/)],
+    ]);
+  });
+
+  it('reads WRAP_ETH and UNWRAP_WETH amounts in the native coin', async () => {
+    const c = AbiCoder.defaultAbiCoder();
+    const ur = new Interface(['function execute(bytes commands,bytes[] inputs,uint256 deadline)']);
+    const sender = '0x0000000000000000000000000000000000000001';
+    const router = '0x0000000000000000000000000000000000000002';
+    const hex = ur.encodeFunctionData('execute', [
+      '0x0b0b0c',
+      [
+        c.encode(['address', 'uint256'], [router, 10n ** 18n]),
+        c.encode(['address', 'uint256'], [router, 1n << 255n]),
+        c.encode(['address', 'uint256'], [sender, 5n * 10n ** 17n]),
+      ],
+      1893456000n,
+    ]);
+    const call = await decode(hex);
+    expect(summarizeTransaction(call, 1).steps.map(line)).toEqual([
+      'Wrap 1 ETH into WETH for ADDRESS_THIS: the router itself',
+      "Wrap all the router's ETH into WETH for ADDRESS_THIS: the router itself",
+      "Unwrap the router's WETH to ETH (at least 0.5 ETH) for MSG_SENDER: the account that called the router",
     ]);
   });
 

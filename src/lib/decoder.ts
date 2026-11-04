@@ -1026,6 +1026,11 @@ function addressOf(v: DecodedValue | undefined): string | undefined {
 
 /** Give a swap step's amounts the units of its input / output token (paths are packed or nested, not top-level). */
 async function applyRouterTokenFlow(flow: TokenFlow, params: DecodedParam[], options: DecodeOptions): Promise<void> {
+  if (flow.kind === 'native') {
+    const native = { symbol: getChain(options.chainId).nativeCurrency, decimals: 18 };
+    for (const q of params) if (q.name === 'amountMin') applyTokenContextToUintPrimitive(q.type, q.value, native, true);
+    return;
+  }
   let tokenIn: string | undefined;
   let tokenOut: string | undefined;
   let amountA: DecodedParam | undefined; // amountIn (exact in) / amountOut (exact out)

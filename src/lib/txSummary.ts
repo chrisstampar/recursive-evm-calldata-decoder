@@ -6,6 +6,7 @@
  */
 import type { DecodedCall, DecodedParam, DecodedValue, UniswapV3Path } from '../types/index.ts';
 import { getTokenInfo } from './abiRegistry.ts';
+import { CHAINS } from './chains.ts';
 import { childCalls, listDecodedCalls } from './callTree.ts';
 import { splitInterpretation } from './valueFormatter.ts';
 
@@ -108,6 +109,17 @@ function get(f: Map<string, DecodedParam>, ...names: string[]): DecodedValue | u
 
 function isZero(v: DecodedValue | undefined): boolean {
   return v?.kind === 'primitive' && v.raw === '0';
+}
+
+/** Universal Router `CONTRACT_BALANCE` (1 << 255): "the router's whole balance" rather than an amount. */
+function isContractBalance(v: DecodedValue | undefined): boolean {
+  return v?.kind === 'primitive' && v.raw === (1n << 255n).toString();
+}
+
+/** The chain's coin and its wrapped token: ETH / WETH, POL / WPOL, BNB / WBNB. */
+function nativeNames(chainId: number): { native: string; wrapped: string } {
+  const native = CHAINS[chainId]?.nativeCurrency ?? 'ETH';
+  return { native, wrapped: `W${native}` };
 }
 
 /** "V3_SWAP_EXACT_OUT" → "V3 swap exact out", "swapExactTokensForTokens" → "Swap exact tokens for tokens". */
@@ -267,10 +279,16 @@ function recipe(call: DecodedCall, chainId: number): SummaryPart[] | null {
     }
     case 'PERMIT2_TRANSFER_FROM':
       return join(text('Pull '), amt(get(f, 'amount'), get(f, 'token')), text(' via Permit2 to '), a(get(f, 'recipient')));
-    case 'WRAP_ETH':
-      return join(text('Wrap '), amt(get(f, 'amountMin'), undefined, 'wei'), text(' of ETH into WETH for '), a(get(f, 'recipient')));
-    case 'UNWRAP_WETH':
-      return join(text('Unwrap WETH (at least '), amt(get(f, 'amountMin'), undefined, 'wei'), text(') to '), a(get(f, 'recipient')));
+    case 'WRAP_ETH': {
+      const { native, wrapped } = nativeNames(chainId);
+      const amount = get(f, 'amountMin');
+      const what = isContractBalance(amount) ? [text(`all the router's ${native}`)] : amt(amount, undefined, 'wei');
+      return join(text('Wrap '), what, text(` into ${wrapped} for `), a(get(f, 'recipient')));
+    }
+    case 'UNWRAP_WETH': {
+      const { native, wrapped } = nativeNames(chainId);
+      return join(text(`Unwrap the router's ${wrapped} to ${native} (at least `), amt(get(f, 'amountMin'), undefined, 'wei'), text(') for '), a(get(f, 'recipient')));
+    }
     case 'SWEEP':
       if (f.has('amountMin')) {
         return join(text('Send all remaining '), a(get(f, 'token')), text(' to '), a(get(f, 'recipient')), text(' (at least '), amt(get(f, 'amountMin'), get(f, 'token')), text(')'));

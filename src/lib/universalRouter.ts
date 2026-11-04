@@ -32,7 +32,9 @@ export type TokenFlow =
   | { kind: 'v3-path'; exactOut: boolean }
   | { kind: 'v2-path'; exactOut: boolean }
   | { kind: 'v4-single'; exactOut: boolean }
-  | { kind: 'v4-path'; exactOut: boolean };
+  | { kind: 'v4-path'; exactOut: boolean }
+  /** Wrapping and unwrapping: the amount is the chain's native coin (WETH and ETH are 1:1, 18 decimals). */
+  | { kind: 'native' };
 
 const p = (name: string, type: string, components?: SignatureParam[]): SignatureParam =>
   components ? { name, type, components } : { name, type };
@@ -96,8 +98,18 @@ export const UNIVERSAL_ROUTER_COMMANDS: Readonly<Record<number, RouterStepSpec>>
       p('signature', 'bytes'),
     ]],
   },
-  0x0b: { kind: 'args', name: 'WRAP_ETH', variants: [[p('recipient', 'address'), p('amountMin', 'uint256')]] },
-  0x0c: { kind: 'args', name: 'UNWRAP_WETH', variants: [[p('recipient', 'address'), p('amountMin', 'uint256')]] },
+  0x0b: {
+    kind: 'args',
+    name: 'WRAP_ETH',
+    variants: [[p('recipient', 'address'), p('amountMin', 'uint256')]],
+    tokenFlow: { kind: 'native' },
+  },
+  0x0c: {
+    kind: 'args',
+    name: 'UNWRAP_WETH',
+    variants: [[p('recipient', 'address'), p('amountMin', 'uint256')]],
+    tokenFlow: { kind: 'native' },
+  },
   0x0d: {
     kind: 'args',
     name: 'PERMIT2_TRANSFER_FROM_BATCH',
